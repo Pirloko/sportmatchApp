@@ -35,7 +35,7 @@ async function getExpoPushToken(): Promise<RegisterResult> {
   const { getPermissionsAsync, requestPermissionsAsync } = await import(
     'expo-notifications/build/NotificationPermissions'
   )
-  const { getExpoPushTokenAsync } = await import(
+  const { default: getExpoPushTokenAsync } = await import(
     'expo-notifications/build/getExpoPushTokenAsync'
   )
 

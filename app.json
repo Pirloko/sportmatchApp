@@ -43,7 +43,9 @@
           "photosPermission": "SportMatch usa tu galería para la foto de perfil y escudos de equipo.",
           "cameraPermission": "SportMatch puede usar la cámara si tomas una foto en lugar de elegir de la galería."
         }
-      ]
+      ],
+      "expo-web-browser",
+      "expo-font"
     ]
   }
 }
