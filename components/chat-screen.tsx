@@ -31,6 +31,7 @@ import { createClient, isSupabaseConfigured } from '../lib/supabase/client'
 import {
   fetchMessagesForOpportunity,
   fetchParticipantsForOpportunity,
+  hydrateChatMessageFromInsert,
   type ChatMessageRow,
   type OpportunityParticipantRow,
 } from '../lib/supabase/message-queries'
@@ -43,6 +44,15 @@ import {
 import { MatchCompletionPanel } from './match-completion-panel'
 
 type UiMessage = ChatMessageRow & { isMe: boolean }
+
+function mergeMessageSorted(prev: UiMessage[], add: UiMessage): UiMessage[] {
+  if (prev.some((m) => m.id === add.id)) return prev
+  return [...prev, add].sort((a, b) => {
+    const t = a.createdAt.getTime() - b.createdAt.getTime()
+    if (t !== 0) return t
+    return a.id.localeCompare(b.id)
+  })
+}
 
 function participantStatusLabel(s: string): string {
   switch (s) {
@@ -146,28 +156,33 @@ export function ChatScreen() {
     }
   }, [opportunityId, currentUser])
 
-  const loadMessages = useCallback(async () => {
-    if (!opportunityId || !currentUser || !isSupabaseConfigured()) {
-      setMessages([])
-      setLoading(false)
-      return
-    }
-    setLoading(true)
-    try {
-      const supabase = createClient()
-      const rows = await fetchMessagesForOpportunity(supabase, opportunityId)
-      setMessages(
-        rows.map((m) => ({
-          ...m,
-          isMe: m.senderId === currentUser.id,
-        }))
-      )
-    } catch {
-      Alert.alert('Error', 'No se pudieron cargar los mensajes')
-    } finally {
-      setLoading(false)
-    }
-  }, [opportunityId, currentUser])
+  const loadMessages = useCallback(
+    async (opts?: { silent?: boolean }) => {
+      if (!opportunityId || !currentUser || !isSupabaseConfigured()) {
+        setMessages([])
+        if (!opts?.silent) setLoading(false)
+        return
+      }
+      if (!opts?.silent) setLoading(true)
+      try {
+        const supabase = createClient()
+        const rows = await fetchMessagesForOpportunity(supabase, opportunityId)
+        setMessages(
+          rows.map((m) => ({
+            ...m,
+            isMe: m.senderId === currentUser.id,
+          }))
+        )
+      } catch {
+        if (!opts?.silent) {
+          Alert.alert('Error', 'No se pudieron cargar los mensajes')
+        }
+      } finally {
+        if (!opts?.silent) setLoading(false)
+      }
+    },
+    [opportunityId, currentUser]
+  )
 
   useEffect(() => {
     if (!opportunity && opportunityId && currentUser) {
@@ -180,15 +195,15 @@ export function ChatScreen() {
   }, [loadMessages])
 
   useEffect(() => {
-    void loadParticipants()
-  }, [loadParticipants])
+    if (showInfo) void loadParticipants()
+  }, [showInfo, loadParticipants])
 
   useEffect(() => {
     void loadMyRating()
   }, [loadMyRating])
 
   useEffect(() => {
-    if (!opportunityId || !isSupabaseConfigured()) return
+    if (!opportunityId || !isSupabaseConfigured() || !currentUser) return
     const supabase = createClient()
     const channel = supabase
       .channel(`messages:${opportunityId}`)
@@ -200,9 +215,23 @@ export function ChatScreen() {
           table: 'messages',
           filter: `opportunity_id=eq.${opportunityId}`,
         },
-        () => {
-          void loadMessages()
-          void loadParticipants()
+        (payload) => {
+          void (async () => {
+            const mapped = await hydrateChatMessageFromInsert(
+              supabase,
+              payload.new
+            )
+            if (!mapped) {
+              void loadMessages({ silent: true })
+              return
+            }
+            setMessages((prev) =>
+              mergeMessageSorted(prev, {
+                ...mapped,
+                isMe: mapped.senderId === currentUser.id,
+              })
+            )
+          })()
         }
       )
       .subscribe()
@@ -210,7 +239,7 @@ export function ChatScreen() {
     return () => {
       void supabase.removeChannel(channel)
     }
-  }, [opportunityId, loadMessages, loadParticipants])
+  }, [opportunityId, currentUser, loadMessages])
 
   const handleSend = async () => {
     if (
@@ -230,11 +259,16 @@ export function ChatScreen() {
     }
 
     const supabase = createClient()
-    const { error } = await supabase.from('messages').insert({
-      opportunity_id: opportunityId,
-      sender_id: currentUser.id,
-      content: newMessage.trim(),
-    })
+    const trimmed = newMessage.trim()
+    const { data: inserted, error } = await supabase
+      .from('messages')
+      .insert({
+        opportunity_id: opportunityId,
+        sender_id: currentUser.id,
+        content: trimmed,
+      })
+      .select('id, sender_id, content, created_at')
+      .single()
 
     if (error) {
       Alert.alert('Error', error.message)
@@ -248,7 +282,20 @@ export function ChatScreen() {
     })
 
     setNewMessage('')
-    void loadMessages()
+    if (inserted) {
+      const ui: UiMessage = {
+        id: inserted.id as string,
+        senderId: inserted.sender_id as string,
+        content: inserted.content as string,
+        createdAt: new Date(inserted.created_at as string),
+        senderName: currentUser.name,
+        senderPhoto: currentUser.photo,
+        isMe: true,
+      }
+      setMessages((prev) => mergeMessageSorted(prev, ui))
+    } else {
+      void loadMessages({ silent: true })
+    }
   }
 
   const goBack = () => router.back()

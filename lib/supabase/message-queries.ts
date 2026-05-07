@@ -74,6 +74,45 @@ export async function fetchMessagesForOpportunity(
   })
 }
 
+/**
+ * Convierte un registro INSERT de realtime (o `.select()` tras insert) en `ChatMessageRow`.
+ * Evita refetch completo del hilo al llegar un mensaje nuevo.
+ */
+export async function hydrateChatMessageFromInsert(
+  supabase: SupabaseClient,
+  raw: unknown
+): Promise<ChatMessageRow | null> {
+  if (!raw || typeof raw !== 'object') return null
+  const r = raw as Record<string, unknown>
+  const id = r.id
+  const senderId = r.sender_id
+  const content = r.content
+  const createdAt = r.created_at
+  if (
+    typeof id !== 'string' ||
+    typeof senderId !== 'string' ||
+    typeof content !== 'string' ||
+    typeof createdAt !== 'string'
+  ) {
+    return null
+  }
+
+  const { data: p } = await supabase
+    .from('profiles')
+    .select('name, photo_url')
+    .eq('id', senderId)
+    .maybeSingle()
+
+  return {
+    id,
+    senderId,
+    content,
+    createdAt: new Date(createdAt),
+    senderName: (p?.name as string) ?? 'Jugador',
+    senderPhoto: (p?.photo_url as string) || DEFAULT_AVATAR,
+  }
+}
+
 export type LastMessagePreview = {
   opportunityId: string
   content: string
