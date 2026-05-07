@@ -35,6 +35,10 @@ function RootLayoutWithTheme() {
           }}
         >
           <Stack.Screen name="index" options={{ headerShown: false }} />
+          <Stack.Screen
+            name="auth/callback"
+            options={{ headerShown: false, animation: 'fade' }}
+          />
           <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
           <Stack.Screen name="swipe" options={{ title: 'Swipe', headerShown: false }} />
           <Stack.Screen name="mi-centro" options={{ title: 'Mi centro', headerShown: false }} />
