@@ -1,6 +1,11 @@
 import { router, useLocalSearchParams } from 'expo-router'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
+  FlashList,
+  type FlashListRef,
+  type ListRenderItemInfo,
+} from '@shopify/flash-list'
+import {
   ActivityIndicator,
   Alert,
   Image,
@@ -16,12 +21,17 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context'
 
 import {
+  getThreadSnapshot,
+  setThreadSnapshot,
+} from '../lib/chat/thread-session-cache'
+import {
   formatMatchClock,
   formatMatchDateTime,
   formatMatchWeekdayDate,
   formatRelativeUntil,
 } from '../lib/format-match'
 import { useApp } from '../lib/app-provider'
+import { DEFAULT_AVATAR } from '../lib/supabase/mappers'
 import { useThemePreference } from '../lib/theme-context'
 import {
   ProductEventNames,
@@ -29,7 +39,8 @@ import {
 } from '../lib/telemetry/product-analytics'
 import { createClient, isSupabaseConfigured } from '../lib/supabase/client'
 import {
-  fetchMessagesForOpportunity,
+  CHAT_MESSAGES_PAGE_SIZE,
+  fetchChatMessagesPage,
   fetchParticipantsForOpportunity,
   hydrateChatMessageFromInsert,
   type ChatMessageRow,
@@ -43,7 +54,7 @@ import {
 } from '../lib/supabase/rating-queries'
 import { MatchCompletionPanel } from './match-completion-panel'
 
-type UiMessage = ChatMessageRow & { isMe: boolean }
+type UiMessage = ChatMessageRow & { isMe: boolean; pending?: boolean }
 
 function mergeMessageSorted(prev: UiMessage[], add: UiMessage): UiMessage[] {
   if (prev.some((m) => m.id === add.id)) return prev
@@ -52,6 +63,39 @@ function mergeMessageSorted(prev: UiMessage[], add: UiMessage): UiMessage[] {
     if (t !== 0) return t
     return a.id.localeCompare(b.id)
   })
+}
+
+function mergeOlderFirst(prev: UiMessage[], older: UiMessage[]): UiMessage[] {
+  const byId = new Map<string, UiMessage>()
+  for (const m of older) byId.set(m.id, m)
+  for (const m of prev) byId.set(m.id, m)
+  return Array.from(byId.values()).sort((a, b) => {
+    const t = a.createdAt.getTime() - b.createdAt.getTime()
+    if (t !== 0) return t
+    return a.id.localeCompare(b.id)
+  })
+}
+
+function toCachedRows(msgs: UiMessage[]): ChatMessageRow[] {
+  return msgs
+    .filter((m) => !m.pending)
+    .map(
+      ({
+        id,
+        senderId,
+        content,
+        createdAt,
+        senderName,
+        senderPhoto,
+      }) => ({
+        id,
+        senderId,
+        content,
+        createdAt,
+        senderName,
+        senderPhoto,
+      })
+    )
 }
 
 function participantStatusLabel(s: string): string {
@@ -98,7 +142,14 @@ export function ChatScreen() {
     null
   )
   const [loadingRating, setLoadingRating] = useState(false)
-  const scrollRef = useRef<ScrollView>(null)
+  const [hasMoreOlder, setHasMoreOlder] = useState(false)
+  const [loadingOlder, setLoadingOlder] = useState(false)
+  const [isSending, setIsSending] = useState(false)
+  const listRef = useRef<FlashListRef<UiMessage>>(null)
+  const messagesRef = useRef<UiMessage[]>([])
+  const hasMoreOlderRef = useRef(false)
+  const loadingOlderRef = useRef(false)
+  const prevLastMessageIdRef = useRef<string | null>(null)
 
   const opportunity = useMemo(
     () =>
@@ -107,6 +158,9 @@ export function ChatScreen() {
         : undefined,
     [matchOpportunities, opportunityId]
   )
+
+  messagesRef.current = messages
+  hasMoreOlderRef.current = hasMoreOlder
 
   const canAccess = useMemo(() => {
     if (!currentUser || !opportunityId || !opportunity) return false
@@ -160,19 +214,41 @@ export function ChatScreen() {
     async (opts?: { silent?: boolean }) => {
       if (!opportunityId || !currentUser || !isSupabaseConfigured()) {
         setMessages([])
+        setHasMoreOlder(false)
         if (!opts?.silent) setLoading(false)
         return
       }
-      if (!opts?.silent) setLoading(true)
+      if (!opts?.silent) {
+        const snap = getThreadSnapshot(opportunityId)
+        if (snap?.messages.length) {
+          setMessages(
+            snap.messages.map((m) => ({
+              ...m,
+              isMe: m.senderId === currentUser.id,
+            }))
+          )
+          setHasMoreOlder(snap.hasMoreOlder)
+        }
+        setLoading(true)
+      }
       try {
         const supabase = createClient()
-        const rows = await fetchMessagesForOpportunity(supabase, opportunityId)
-        setMessages(
-          rows.map((m) => ({
-            ...m,
-            isMe: m.senderId === currentUser.id,
-          }))
+        const { rows, hasMore } = await fetchChatMessagesPage(
+          supabase,
+          opportunityId,
+          null,
+          CHAT_MESSAGES_PAGE_SIZE
         )
+        const ui = rows.map((m) => ({
+          ...m,
+          isMe: m.senderId === currentUser.id,
+        }))
+        setMessages(ui)
+        setHasMoreOlder(hasMore)
+        setThreadSnapshot(opportunityId, {
+          messages: rows,
+          hasMoreOlder: hasMore,
+        })
       } catch {
         if (!opts?.silent) {
           Alert.alert('Error', 'No se pudieron cargar los mensajes')
@@ -183,6 +259,55 @@ export function ChatScreen() {
     },
     [opportunityId, currentUser]
   )
+
+  const loadOlderMessages = useCallback(async () => {
+    if (!opportunityId || !currentUser || !isSupabaseConfigured()) return
+    if (!hasMoreOlderRef.current || loadingOlderRef.current) return
+    const prev = messagesRef.current
+    if (!prev.length) return
+    const oldest = prev[0]
+    if (oldest.pending) return
+
+    loadingOlderRef.current = true
+    setLoadingOlder(true)
+    try {
+      const before = {
+        createdAtIso: oldest.createdAt.toISOString(),
+        id: oldest.id,
+      }
+      const supabase = createClient()
+      const { rows, hasMore } = await fetchChatMessagesPage(
+        supabase,
+        opportunityId,
+        before,
+        CHAT_MESSAGES_PAGE_SIZE
+      )
+      if (!rows.length) {
+        setHasMoreOlder(false)
+        return
+      }
+      const olderUi = rows.map((m) => ({
+        ...m,
+        isMe: m.senderId === currentUser.id,
+      }))
+      setMessages((p) => {
+        const next = mergeOlderFirst(p, olderUi)
+        queueMicrotask(() => {
+          setThreadSnapshot(opportunityId, {
+            hasMoreOlder: hasMore,
+            messages: toCachedRows(next),
+          })
+        })
+        return next
+      })
+      setHasMoreOlder(hasMore)
+    } catch {
+      Alert.alert('Error', 'No se pudieron cargar mensajes anteriores')
+    } finally {
+      loadingOlderRef.current = false
+      setLoadingOlder(false)
+    }
+  }, [opportunityId, currentUser])
 
   useEffect(() => {
     if (!opportunity && opportunityId && currentUser) {
@@ -225,12 +350,25 @@ export function ChatScreen() {
               void loadMessages({ silent: true })
               return
             }
-            setMessages((prev) =>
-              mergeMessageSorted(prev, {
+            setMessages((prev) => {
+              let base = prev
+              if (mapped.senderId === currentUser.id) {
+                const idx = prev.findIndex(
+                  (m) =>
+                    m.pending &&
+                    m.isMe &&
+                    m.senderId === mapped.senderId &&
+                    m.content === mapped.content
+                )
+                if (idx >= 0) {
+                  base = [...prev.slice(0, idx), ...prev.slice(idx + 1)]
+                }
+              }
+              return mergeMessageSorted(base, {
                 ...mapped,
                 isMe: mapped.senderId === currentUser.id,
               })
-            )
+            })
           })()
         }
       )
@@ -241,12 +379,89 @@ export function ChatScreen() {
     }
   }, [opportunityId, currentUser, loadMessages])
 
+  useEffect(() => {
+    if (loadingOlder) {
+      const last = messages[messages.length - 1]?.id ?? null
+      if (last) prevLastMessageIdRef.current = last
+      return
+    }
+    if (messages.length === 0) {
+      prevLastMessageIdRef.current = null
+      return
+    }
+    const lastId = messages[messages.length - 1]?.id ?? null
+    const prevLast = prevLastMessageIdRef.current
+    if (prevLast === null) {
+      prevLastMessageIdRef.current = lastId
+      requestAnimationFrame(() =>
+        listRef.current?.scrollToEnd({ animated: false })
+      )
+      return
+    }
+    if (lastId !== prevLast) {
+      prevLastMessageIdRef.current = lastId
+      requestAnimationFrame(() =>
+        listRef.current?.scrollToEnd({ animated: true })
+      )
+      return
+    }
+    prevLastMessageIdRef.current = lastId
+  }, [messages, loadingOlder])
+
+  const renderMessage = useCallback(
+    ({ item: message }: ListRenderItemInfo<UiMessage>) => (
+      <View
+        style={[
+          styles.msgRow,
+          message.isMe ? styles.msgRowMe : styles.msgRowThem,
+          message.pending && styles.msgRowPending,
+        ]}
+      >
+        {!message.isMe ? (
+          <Image
+            source={{ uri: message.senderPhoto }}
+            style={styles.msgAvatar}
+          />
+        ) : null}
+        <View
+          style={[
+            styles.bubble,
+            message.isMe ? styles.bubbleMe : styles.bubbleThem,
+          ]}
+        >
+          {!message.isMe ? (
+            <Text style={styles.senderName}>{message.senderName}</Text>
+          ) : null}
+          <Text
+            style={[
+              styles.msgText,
+              message.isMe ? styles.msgTextMe : styles.msgTextThem,
+            ]}
+          >
+            {message.content}
+          </Text>
+          <Text
+            style={[
+              styles.msgTime,
+              message.isMe ? styles.msgTimeMe : styles.msgTimeThem,
+            ]}
+          >
+            {formatMatchClock(message.createdAt)}
+            {message.pending ? ' · …' : ''}
+          </Text>
+        </View>
+      </View>
+    ),
+    []
+  )
+
   const handleSend = async () => {
     if (
       !newMessage.trim() ||
       !currentUser ||
       !opportunityId ||
-      !isSupabaseConfigured()
+      !isSupabaseConfigured() ||
+      isSending
     ) {
       return
     }
@@ -260,6 +475,24 @@ export function ChatScreen() {
 
     const supabase = createClient()
     const trimmed = newMessage.trim()
+    const tempId = `pending:${Date.now().toString(36)}:${Math.random()
+      .toString(36)
+      .slice(2, 10)}`
+
+    const pendingMsg: UiMessage = {
+      id: tempId,
+      senderId: currentUser.id,
+      content: trimmed,
+      createdAt: new Date(),
+      senderName: currentUser.name,
+      senderPhoto: currentUser.photo || DEFAULT_AVATAR,
+      isMe: true,
+      pending: true,
+    }
+    setMessages((p) => mergeMessageSorted(p, pendingMsg))
+    setNewMessage('')
+    setIsSending(true)
+
     const { data: inserted, error } = await supabase
       .from('messages')
       .insert({
@@ -271,7 +504,10 @@ export function ChatScreen() {
       .single()
 
     if (error) {
+      setMessages((p) => p.filter((m) => m.id !== tempId))
+      setNewMessage(trimmed)
       Alert.alert('Error', error.message)
+      setIsSending(false)
       return
     }
 
@@ -281,7 +517,6 @@ export function ChatScreen() {
       supabase,
     })
 
-    setNewMessage('')
     if (inserted) {
       const ui: UiMessage = {
         id: inserted.id as string,
@@ -289,13 +524,25 @@ export function ChatScreen() {
         content: inserted.content as string,
         createdAt: new Date(inserted.created_at as string),
         senderName: currentUser.name,
-        senderPhoto: currentUser.photo,
+        senderPhoto: currentUser.photo || DEFAULT_AVATAR,
         isMe: true,
       }
-      setMessages((prev) => mergeMessageSorted(prev, ui))
+      setMessages((prev) => {
+        const without = prev.filter((m) => m.id !== tempId)
+        const next = mergeMessageSorted(without, ui)
+        queueMicrotask(() => {
+          setThreadSnapshot(opportunityId, {
+            hasMoreOlder: hasMoreOlderRef.current,
+            messages: toCachedRows(next),
+          })
+        })
+        return next
+      })
     } else {
+      setMessages((p) => p.filter((m) => m.id !== tempId))
       void loadMessages({ silent: true })
     }
+    setIsSending(false)
   }
 
   const goBack = () => router.back()
@@ -438,62 +685,45 @@ export function ChatScreen() {
           </ScrollView>
         ) : null}
 
-        <ScrollView
-          ref={scrollRef}
+        <FlashList
+          ref={listRef}
+          data={messages}
+          keyExtractor={(item) => item.id}
+          renderItem={renderMessage}
           style={styles.msgScroll}
           contentContainerStyle={styles.msgContent}
-          onContentSizeChange={() =>
-            scrollRef.current?.scrollToEnd({ animated: true })
-          }
           keyboardShouldPersistTaps="handled"
-        >
-          {loading && messages.length === 0 ? (
-            <Text style={styles.loadingText}>Cargando mensajes…</Text>
-          ) : (
-            messages.map((message) => (
-              <View
-                key={message.id}
-                style={[
-                  styles.msgRow,
-                  message.isMe ? styles.msgRowMe : styles.msgRowThem,
-                ]}
-              >
-                {!message.isMe ? (
-                  <Image
-                    source={{ uri: message.senderPhoto }}
-                    style={styles.msgAvatar}
-                  />
-                ) : null}
-                <View
-                  style={[
-                    styles.bubble,
-                    message.isMe ? styles.bubbleMe : styles.bubbleThem,
-                  ]}
-                >
-                  {!message.isMe ? (
-                    <Text style={styles.senderName}>{message.senderName}</Text>
-                  ) : null}
-                  <Text
-                    style={[
-                      styles.msgText,
-                      message.isMe ? styles.msgTextMe : styles.msgTextThem,
-                    ]}
-                  >
-                    {message.content}
+          ListHeaderComponent={
+            hasMoreOlder ? (
+              <View style={styles.olderHeader}>
+                {loadingOlder ? (
+                  <ActivityIndicator color="#6b7280" />
+                ) : (
+                  <Text style={styles.olderHint}>
+                    Desliza arriba para cargar anteriores
                   </Text>
-                  <Text
-                    style={[
-                      styles.msgTime,
-                      message.isMe ? styles.msgTimeMe : styles.msgTimeThem,
-                    ]}
-                  >
-                    {formatMatchClock(message.createdAt)}
-                  </Text>
-                </View>
+                )}
               </View>
-            ))
-          )}
-        </ScrollView>
+            ) : null
+          }
+          ListEmptyComponent={
+            loading ? (
+              <Text style={styles.loadingText}>Cargando mensajes…</Text>
+            ) : (
+              <Text style={styles.loadingText}>Sin mensajes aún.</Text>
+            )
+          }
+          onStartReached={() => {
+            if (hasMoreOlder && !loadingOlderRef.current) {
+              void loadOlderMessages()
+            }
+          }}
+          onStartReachedThreshold={0.25}
+          maintainVisibleContentPosition={{
+            startRenderingFromBottom: true,
+            autoscrollToTopThreshold: 80,
+          }}
+        />
 
         <View style={styles.inputBar}>
           {!chatOpen ? (
@@ -537,10 +767,11 @@ export function ChatScreen() {
             <Pressable
               style={[
                 styles.sendBtn,
-                (!newMessage.trim() || !chatOpen) && styles.sendBtnOff,
+                (!newMessage.trim() || !chatOpen || isSending) &&
+                  styles.sendBtnOff,
               ]}
               onPress={() => void handleSend()}
-              disabled={!newMessage.trim() || !chatOpen}
+              disabled={!newMessage.trim() || !chatOpen || isSending}
             >
               <Text style={styles.sendBtnText}>Enviar</Text>
             </Pressable>
@@ -648,6 +879,12 @@ const styles = StyleSheet.create({
   partStatus: { fontSize: 11, color: '#6b7280' },
   msgScroll: { flex: 1 },
   msgContent: { padding: 16, paddingBottom: 8 },
+  olderHeader: {
+    paddingVertical: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  olderHint: { fontSize: 12, color: '#9ca3af' },
   loadingText: { textAlign: 'center', color: '#6b7280', paddingVertical: 24 },
   msgRow: {
     width: '100%',
@@ -658,6 +895,7 @@ const styles = StyleSheet.create({
   },
   msgRowMe: { justifyContent: 'flex-end' },
   msgRowThem: { justifyContent: 'flex-start' },
+  msgRowPending: { opacity: 0.72 },
   msgAvatar: {
     width: 32,
     height: 32,

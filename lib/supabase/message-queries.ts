@@ -39,6 +39,90 @@ export type ChatMessageRow = {
   senderPhoto: string
 }
 
+/** Tamaño por defecto de página del hilo (últimos N mensajes y “cargar anteriores”). */
+export const CHAT_MESSAGES_PAGE_SIZE = 40
+
+/** Cursor keyset: mensaje más antiguo ya cargado (orden cronológico ascendente en UI). */
+export type ChatMessagePageCursor = {
+  createdAtIso: string
+  id: string
+}
+
+type RawMessageRow = {
+  id: string
+  sender_id: string
+  content: string
+  created_at: string
+}
+
+async function mapRawMessagesToChatRows(
+  supabase: SupabaseClient,
+  msgs: RawMessageRow[]
+): Promise<ChatMessageRow[]> {
+  if (!msgs.length) return []
+
+  const senderIds = [...new Set(msgs.map((m) => m.sender_id))]
+  const { data: profs } = await supabase
+    .from('profiles')
+    .select('id, name, photo_url')
+    .in('id', senderIds)
+
+  const pmap = new Map(
+    (profs ?? []).map((p) => [p.id as string, p] as const)
+  )
+
+  return msgs.map((m) => {
+    const p = pmap.get(m.sender_id)
+    return {
+      id: m.id,
+      senderId: m.sender_id,
+      content: m.content,
+      createdAt: new Date(m.created_at),
+      senderName: (p?.name as string) ?? 'Jugador',
+      senderPhoto: (p?.photo_url as string) || DEFAULT_AVATAR,
+    }
+  })
+}
+
+/**
+ * Página del hilo: orden interno de consulta descendente (más recientes primero),
+ * devuelve `rows` en orden cronológico ascendente (antiguo → reciente) para la UI.
+ */
+export async function fetchChatMessagesPage(
+  supabase: SupabaseClient,
+  opportunityId: string,
+  before: ChatMessagePageCursor | null,
+  limit: number
+): Promise<{ rows: ChatMessageRow[]; hasMore: boolean }> {
+  const pageSize = Math.max(1, limit)
+  const fetchLimit = pageSize + 1
+
+  let q = supabase
+    .from('messages')
+    .select('id, sender_id, content, created_at')
+    .eq('opportunity_id', opportunityId)
+    .order('created_at', { ascending: false })
+    .order('id', { ascending: false })
+    .limit(fetchLimit)
+
+  if (before) {
+    const iso = before.createdAtIso
+    const id = before.id
+    q = q.or(`created_at.lt."${iso}",and(created_at.eq."${iso}",id.lt."${id}")`)
+  }
+
+  const { data: raw, error } = await q
+  if (error || !raw?.length) {
+    return { rows: [], hasMore: false }
+  }
+
+  const hasMore = raw.length > pageSize
+  const slice = (hasMore ? raw.slice(0, pageSize) : raw) as RawMessageRow[]
+  const chronological = slice.slice().reverse()
+  const rows = await mapRawMessagesToChatRows(supabase, chronological)
+  return { rows, hasMore }
+}
+
 export async function fetchMessagesForOpportunity(
   supabase: SupabaseClient,
   opportunityId: string
@@ -51,27 +135,7 @@ export async function fetchMessagesForOpportunity(
 
   if (error || !msgs?.length) return []
 
-  const senderIds = [...new Set(msgs.map((m) => m.sender_id as string))]
-  const { data: profs } = await supabase
-    .from('profiles')
-    .select('id, name, photo_url')
-    .in('id', senderIds)
-
-  const pmap = new Map(
-    (profs ?? []).map((p) => [p.id as string, p] as const)
-  )
-
-  return msgs.map((m) => {
-    const p = pmap.get(m.sender_id as string)
-    return {
-      id: m.id as string,
-      senderId: m.sender_id as string,
-      content: m.content as string,
-      createdAt: new Date(m.created_at as string),
-      senderName: p?.name ?? 'Jugador',
-      senderPhoto: p?.photo_url || DEFAULT_AVATAR,
-    }
-  })
+  return mapRawMessagesToChatRows(supabase, msgs as RawMessageRow[])
 }
 
 /**

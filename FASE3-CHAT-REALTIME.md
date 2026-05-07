@@ -1,53 +1,66 @@
-# Fase 3 — Chat y realtime (incremental)
+# Fase 3 — Chat y realtime (100% alcance `mejoras.md`)
 
 Fecha: 2026-05-06  
 Rama: `feature-carlos`
 
-## Objetivo (mejoras.md)
+## Objetivo (`mejoras.md` — Fase 3)
 
-Reducir **refetch completo** del hilo y **carga innecesaria de participantes** al recibir mensajes por Supabase Realtime, **sin** romper orden ni sincronización multiusuario.
+Optimizar **realtime y chat** sin romper sincronización ni orden, incluyendo:
+
+- append / invalidación parcial incremental  
+- **paginación** (“cargar anteriores”)  
+- **caché local** de sesión para reentrar al hilo  
+- **actualizaciones optimistas** con rollback si falla el envío  
+- lista con **FlashList** (`@shopify/flash-list`, alineado a Expo SDK 54)
 
 ## Cambios realizados
 
 ### `lib/supabase/message-queries.ts`
 
-- **`hydrateChatMessageFromInsert`**: mapea un payload de INSERT (realtime o fila devuelta por `.select()` tras insert) a `ChatMessageRow`, con una consulta a `profiles` para nombre y foto.
+- **`mapRawMessagesToChatRows`**: enriquece filas con perfiles (reutilizado por fetch completo y por página).
+- **`CHAT_MESSAGES_PAGE_SIZE`** (40), **`ChatMessagePageCursor`**, **`fetchChatMessagesPage`**: paginación **keyset** `(created_at, id)` en orden descendente, más una fila extra para saber si hay más historial.
+- **`fetchMessagesForOpportunity`**: conserva el contrato anterior (carga completa en una query) para otros usos.
+- **`hydrateChatMessageFromInsert`**: sin cambio de contrato; sigue usándose en realtime y envío.
+
+### `lib/chat/thread-session-cache.ts`
+
+- Caché en memoria por `opportunityId` (máx. 32 entradas FIFO): último snapshot de **`ChatMessageRow[]`** + **`hasMoreOlder`**.
+- **`getThreadSnapshot` / `setThreadSnapshot` / `clearThreadSnapshot`**: lectura/escritura para pintar al instante al volver al chat y tras sincronizar.
 
 ### `components/chat-screen.tsx`
 
-- **`mergeMessageSorted`**: fusiona un mensaje nuevo en la lista existente con **deduplicación por `id`** y orden estable por `created_at` y `id`.
-- **`loadMessages({ silent?: boolean })`**: en errores con `silent: true` no se muestra alerta (útil como fallback tras realtime o envío).
-- **Realtime INSERT**: usa `hydrateChatMessageFromInsert` + `mergeMessageSorted`; si el mapeo falla, `loadMessages({ silent: true })`. **No** se llama `loadParticipants` en cada mensaje.
-- **Participantes**: `loadParticipants` solo cuando **`showInfo` es true** (panel ℹ️ abierto), no en cada montaje permanente.
-- **`handleSend`**: `insert(...).select('id, sender_id, content, created_at').single()` y merge local; si hay fila insertada, **no** se llama `loadMessages()` completo tras enviar.
+- Carga inicial por **página reciente** + hidratación desde caché mientras llega red.
+- **`loadOlderMessages`**: al acercarse al inicio de la lista (`onStartReached`), carga la página anterior con **`mergeOlderFirst`** (dedupe por `id`) y **`maintainVisibleContentPosition`** + **`startRenderingFromBottom`** para no “saltar” el scroll al anteponer.
+- **Realtime INSERT**: elimina burbuja **`pending`** del mismo usuario y mismo texto antes de fusionar el evento (evita duplicado si el evento llega antes que la respuesta del `insert`).
+- **Envío optimista**: burbuja con `pending`, texto “· …” en hora, opacidad reducida; si **`insert` falla**, se **revierte** (quita burbuja, restaura el input, alerta).
+- Lista de mensajes con **`FlashList`** (sin `estimatedItemSize`; API FlashList 2.x).
+- Dependencia nueva: **`@shopify/flash-list`** (vía `npx expo install`).
 
-## Qué no se hizo (acorde al plan incremental)
+## Recomendación Fase 4 (SQL)
 
-- Paginación “cargar mensajes anteriores”.
-- Migración a FlashList (queda para Fase 5 / evaluación posterior).
-- Optimistic send con rollback explícito (solo merge tras éxito del insert).
+Para hilos muy largos, conviene un índice compuesto acorde al orden de paginación, por ejemplo en `messages`:
 
-## Impacto esperado
-
-- Menos round-trips al abrir chat y al recibir mensajes (especialmente en conversaciones activas).
-- Menos trabajo en cada evento realtime (sin refetch de participantes ni lista completa de mensajes en el caso feliz).
-
-## Riesgos y pruebas manuales
-
-- Verificar con **dos cuentas/dispositivos**: orden cronológico, sin duplicados visibles al enviar y al recibir por realtime.
-- Abrir panel ℹ️: lista de participantes debe cargar al mostrarse.
-- Si RLS o forma del payload cambian, `hydrateChatMessageFromInsert` puede devolver `null` → debe recuperarse con `loadMessages({ silent: true })`.
+`(opportunity_id, created_at DESC, id DESC)` — validar con `EXPLAIN ANALYZE` en tu instancia.
 
 ## Verificación
 
 - `npx tsc --noEmit`
 - `npx expo-doctor` (17/17)
 
-## Archivos modificados
+## Archivos tocados
 
 - `lib/supabase/message-queries.ts`
+- `lib/chat/thread-session-cache.ts`
 - `components/chat-screen.tsx`
+- `package.json` / `package-lock.json` (`@shopify/flash-list`)
 - Este documento
+
+## Pruebas manuales sugeridas
+
+- Dos dispositivos: orden, sin duplicados al enviar y por realtime.
+- Hilo con **>40 mensajes**: deslizar arriba, cargar anteriores, comprobar que el scroll no pierde el mensaje visible.
+- Fallo de red al enviar: el mensaje optimista desaparece y el texto vuelve al input.
+- Salir y volver al mismo chat: datos en caché visibles al instante y luego sustitución por la primera página fresca.
 
 ## Rollback
 
@@ -57,4 +70,4 @@ git revert <commit>
 
 ## Próximo paso sugerido
 
-**Fase 4 — SQL y performance backend** (`mejoras.md`), o paginación/FlashList cuando se priorice UX de hilos largos.
+**Fase 4 — SQL y performance backend** (`mejoras.md`), empezando por índices seguros en `messages` y tablas calientes.
