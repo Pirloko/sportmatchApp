@@ -7,7 +7,7 @@
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",
-    "newArchEnabled": true,
+    "newArchEnabled": false,
     "splash": {
       "image": "./assets/splash-icon.png",
       "resizeMode": "contain",
@@ -55,6 +55,15 @@
       ],
       "expo-web-browser",
       "expo-font"
-    ]
+    ],
+    "extra": {
+      "router": {
+        "root": "./app"
+      },
+      "eas": {
+        "projectId": "300ae0e4-3792-4c58-b395-1cafefeb2322"
+      }
+    },
+    "owner": "pirloko21"
   }
 }
