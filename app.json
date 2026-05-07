@@ -1,0 +1,49 @@
+{
+  "expo": {
+    "name": "SportMatch",
+    "slug": "sportmatch",
+    "scheme": "sportmatch",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "light",
+    "newArchEnabled": true,
+    "splash": {
+      "image": "./assets/splash-icon.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#ffffff"
+    },
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.pichanga.expo"
+    },
+    "android": {
+      "package": "com.pichanga.expo",
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#ffffff"
+      },
+      "edgeToEdgeEnabled": true,
+      "predictiveBackGestureEnabled": false
+    },
+    "web": {
+      "favicon": "./assets/favicon.png"
+    },
+    "plugins": [
+      [
+        "expo-router",
+        {
+          "root": "./app"
+        }
+      ],
+      "expo-notifications",
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "SportMatch usa tu galería para la foto de perfil y escudos de equipo.",
+          "cameraPermission": "SportMatch puede usar la cámara si tomas una foto en lugar de elegir de la galería."
+        }
+      ]
+    ]
+  }
+}
