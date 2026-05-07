@@ -1,40 +1,91 @@
-# Fase 2 — App Provider y rerenders (incremental)
+# Fase 2 — App Provider y rerenders (100% alcance `mejoras.md`)
 
 Fecha: 2026-05-07  
 Rama: `feature-carlos`
 
-## Objetivo (mejoras.md)
+## Objetivo (`mejoras.md` — Fase 2)
 
-Reducir **referencias inestables** del contexto y preparar el terreno para menos trabajo en reconciliación, **sin** separar providers ni refactor masivo.
+Reducir rerenders globales del `AppProvider` sin refactor masivo, aplicando:
 
-## Cambio realizado
+- `useMemo` del `value` del contexto
+- `useCallback` consistente en acciones expuestas
+- memoización estructural para estados calientes
+- selectores derivados memoizados
 
-### `useMemo` del objeto `value` de `AppContext`
+## Cambios implementados
 
-- **Antes:** en cada render de `AppProvider` se creaba un **objeto nuevo** `value`, aunque los campos fueran iguales (p. ej. re-renders por estado interno que no afecta al contexto en teoría, o patrones de doble render en desarrollo).
-- **Ahora:** `value` solo cambia de identidad cuando cambia **algún estado expuesto** o **alguna función** incluida en el array de dependencias (alineado con el contrato real del contexto).
+### 1) `value` del contexto estabilizado
 
-Los flags derivados `isAuthenticated`, `needsOnboarding` y `needsVenueOnboarding` se calculan **dentro** del `useMemo`, eliminando variables intermedias en cada render.
+- Se mantiene `useMemo<AppContextType>` para `value` de `AppContext`.
+- Flags derivados (`isAuthenticated`, `needsOnboarding`, `needsVenueOnboarding`) permanecen calculados dentro del `useMemo`.
 
-## Qué no se hizo (acorde al plan)
+### 2) Memoización estructural en listas calientes
 
-- No se dividió el provider en varios contextos.
-- No se reescribieron callbacks con refs para recortar dependencias (riesgo de regresión).
-- No se tocó la API pública de `useApp()`.
+En `lib/app-provider.tsx` se añadió:
+
+- `arraysEqualByKey` y `setArrayStateIfChanged`.
+- Setters estables por dominio:
+  - `setMatchOpportunitiesStable`
+  - `setUsersStable`
+  - `setTeamsStable`
+  - `setTeamInvitesStable`
+  - `setTeamJoinRequestsStable`
+  - `setRivalChallengesStable`
+  - `setParticipatingOpportunityIdsStable`
+
+Estos setters evitan reemplazar el estado cuando la colección nueva tiene mismas claves y orden, reduciendo invalidaciones innecesarias del `value` del contexto.
+
+### 3) Selectores derivados memoizados
+
+Se añadieron selectores derivados con `useMemo` + funciones estables con `useCallback`:
+
+- `matchesByGender` + `getFilteredMatches`
+- `myTeams` + `getUserTeams`
+- `teamsByGender` + `getFilteredTeams`
+- `usersByGender` + `getFilteredUsers`
+
+Con esto, los consumidores reutilizan referencias estables mientras no cambie la fuente.
+
+### 4) Aplicación incremental en flujos críticos
+
+Se aplicaron los setters estables en refrescos y mutaciones más calientes:
+
+- hidratación inicial de datos de jugador
+- `refreshMatchData`
+- `refreshTeamData`
+- join/accept de partidos e invitaciones
+- desafíos rival (`respondToRivalChallenge`, `acceptRivalOpportunityWithTeam`)
+- refrescos de invitaciones y solicitudes de equipo
+- creación de partidos con refetch posterior
+
+## Qué no se tocó (por seguridad)
+
+- No se separó `AppProvider` en múltiples contextos.
+- No se cambió API pública de `useApp()`.
+- No se modificó lógica de negocio (auth, RLS, RPC, navegación, realtime).
 
 ## Impacto esperado
 
-- **Moderado en desarrollo:** menos propagación de un `value` nuevo cuando el árbol del provider se monta/actualiza sin cambiar datos del contexto.
-- **En producción:** el cuello de botella principal sigue siendo que **cualquier cambio en listas calientes** (`matchOpportunities`, `teams`, etc.) sigue invalidando `value`; eso se abordará en fases posteriores (React Query / providers por dominio).
+- Menor propagación de renders cuando Supabase devuelve datos equivalentes.
+- Menor churn de objetos/arrays en selectores usados por pantallas de partidos/equipos.
+- Mejor estabilidad general del árbol sin cambios arquitectónicos destructivos.
 
 ## Verificación
 
-- `npx tsc --noEmit`
+- `npx tsc --noEmit` ✅
+- `npx expo-doctor` ✅ (17/17)
+- `ReadLints` sobre `lib/app-provider.tsx` ✅ sin errores
 
 ## Archivos modificados
 
 - `lib/app-provider.tsx`
 - Este documento
+
+## Riesgos y pruebas manuales recomendadas
+
+- Validar login/logout e hidratación de sesión.
+- Validar joins/invitaciones/desafíos (sin regresiones funcionales).
+- Revisar que listas de partidos/equipos sigan actualizando tras acciones.
 
 ## Rollback
 
@@ -42,6 +93,6 @@ Los flags derivados `isAuthenticated`, `needsOnboarding` y `needsVenueOnboarding
 git revert <commit>
 ```
 
-## Próximo paso sugerido
+## Siguiente fase sugerida
 
-**Fase 3 — Chat y realtime** (`mejoras.md`), o micro-optimización adicional de callbacks solo si se mide un cuello concreto.
+Con Fase 2 cerrada al 100%, el siguiente bloque natural es **Fase 4 — SQL y performance backend** (Fase 3 ya fue cerrada).

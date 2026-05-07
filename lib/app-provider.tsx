@@ -8,6 +8,8 @@ import * as Linking from 'expo-linking'
 import * as WebBrowser from 'expo-web-browser'
 import {
   createContext,
+  type Dispatch,
+  type SetStateAction,
   useCallback,
   useContext,
   useEffect,
@@ -320,6 +322,27 @@ type AppContextType = {
 
 const AppContext = createContext<AppContextType | undefined>(undefined)
 
+function arraysEqualByKey<T>(
+  a: T[],
+  b: T[],
+  getKey: (item: T) => string
+): boolean {
+  if (a === b) return true
+  if (a.length !== b.length) return false
+  for (let i = 0; i < a.length; i += 1) {
+    if (getKey(a[i]) !== getKey(b[i])) return false
+  }
+  return true
+}
+
+function setArrayStateIfChanged<T>(
+  setter: Dispatch<SetStateAction<T[]>>,
+  next: T[],
+  getKey: (item: T) => string
+): void {
+  setter((prev) => (arraysEqualByKey(prev, next, getKey) ? prev : next))
+}
+
 export function AppProvider({ children }: { children: ReactNode }) {
   const supabase = useMemo<SupabaseClient | null>(() => {
     if (!isSupabaseConfigured()) return null
@@ -348,6 +371,28 @@ export function AppProvider({ children }: { children: ReactNode }) {
     'registration' | 'profile_edit'
   >('registration')
 
+  const setMatchOpportunitiesStable = useCallback((next: MatchOpportunity[]) => {
+    setArrayStateIfChanged(setMatchOpportunities, next, (m) => m.id)
+  }, [])
+  const setUsersStable = useCallback((next: User[]) => {
+    setArrayStateIfChanged(setUsers, next, (u) => u.id)
+  }, [])
+  const setTeamsStable = useCallback((next: Team[]) => {
+    setArrayStateIfChanged(setTeams, next, (t) => t.id)
+  }, [])
+  const setTeamInvitesStable = useCallback((next: TeamInvite[]) => {
+    setArrayStateIfChanged(setTeamInvites, next, (inv) => inv.id)
+  }, [])
+  const setTeamJoinRequestsStable = useCallback((next: TeamJoinRequest[]) => {
+    setArrayStateIfChanged(setTeamJoinRequests, next, (req) => req.id)
+  }, [])
+  const setRivalChallengesStable = useCallback((next: RivalChallenge[]) => {
+    setArrayStateIfChanged(setRivalChallenges, next, (c) => c.id)
+  }, [])
+  const setParticipatingOpportunityIdsStable = useCallback((next: string[]) => {
+    setArrayStateIfChanged(setParticipatingOpportunityIds, next, (id) => id)
+  }, [])
+
   const fetchAndSetPlayerData = useCallback(
     async (client: SupabaseClient, userId: string, profile: User) => {
       if (profile.accountType !== 'player') return
@@ -368,15 +413,23 @@ export function AppProvider({ children }: { children: ReactNode }) {
         fetchParticipatingOpportunityIds(client, userId),
         fetchRivalChallengesForUser(client, userId),
       ])
-      setMatchOpportunities(matches)
-      setUsers(others)
-      setTeams(teamList)
-      setTeamInvites(invites)
-      setTeamJoinRequests(joinReqs)
-      setParticipatingOpportunityIds(partIds)
-      setRivalChallenges(challenges)
+      setMatchOpportunitiesStable(matches)
+      setUsersStable(others)
+      setTeamsStable(teamList)
+      setTeamInvitesStable(invites)
+      setTeamJoinRequestsStable(joinReqs)
+      setParticipatingOpportunityIdsStable(partIds)
+      setRivalChallengesStable(challenges)
     },
-    []
+    [
+      setMatchOpportunitiesStable,
+      setParticipatingOpportunityIdsStable,
+      setRivalChallengesStable,
+      setTeamInvitesStable,
+      setTeamJoinRequestsStable,
+      setTeamsStable,
+      setUsersStable,
+    ]
   )
 
   const clearLists = useCallback(() => {
@@ -947,9 +1000,14 @@ export function AppProvider({ children }: { children: ReactNode }) {
       fetchParticipatingOpportunityIds(supabase, currentUser.id),
       fetchMatchOpportunities(supabase),
     ])
-    setParticipatingOpportunityIds(partIds)
-    setMatchOpportunities(matches)
-  }, [currentUser, supabase])
+    setParticipatingOpportunityIdsStable(partIds)
+    setMatchOpportunitiesStable(matches)
+  }, [
+    currentUser,
+    setMatchOpportunitiesStable,
+    setParticipatingOpportunityIdsStable,
+    supabase,
+  ])
 
   const finalizeMatchOpportunity = useCallback(
     async (
@@ -1033,7 +1091,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       }
 
       const matches = await fetchMatchOpportunities(supabase)
-      setMatchOpportunities(matches)
+      setMatchOpportunitiesStable(matches)
       return { ok: true }
     },
     [currentUser, supabase, matchOpportunities]
@@ -1076,7 +1134,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       }
 
       const matches = await fetchMatchOpportunities(supabase)
-      setMatchOpportunities(matches)
+      setMatchOpportunitiesStable(matches)
       return { ok: true }
     },
     [currentUser, supabase, matchOpportunities]
@@ -1140,19 +1198,47 @@ export function AppProvider({ children }: { children: ReactNode }) {
     [currentUser, supabase]
   )
 
-  const getFilteredMatches = useCallback(
-    (gender: Gender) => matchOpportunities.filter((m) => m.gender === gender),
+  const matchesByGender = useMemo(
+    () => ({
+      male: matchOpportunities.filter((m) => m.gender === 'male'),
+      female: matchOpportunities.filter((m) => m.gender === 'female'),
+    }),
     [matchOpportunities]
   )
 
-  const getUserTeams = useCallback(() => {
-    if (!currentUser) return []
+  const myTeams = useMemo(() => {
+    if (!currentUser) return [] as Team[]
     return teams.filter(
       (t) =>
         t.captainId === currentUser.id ||
         t.members.some((m) => m.id === currentUser.id)
     )
   }, [teams, currentUser])
+
+  const teamsByGender = useMemo(
+    () => ({
+      male: teams.filter((t) => t.gender === 'male'),
+      female: teams.filter((t) => t.gender === 'female'),
+    }),
+    [teams]
+  )
+
+  const usersByGender = useMemo(
+    () => ({
+      male: users.filter((u) => u.gender === 'male' && u.id !== currentUser?.id),
+      female: users.filter(
+        (u) => u.gender === 'female' && u.id !== currentUser?.id
+      ),
+    }),
+    [users, currentUser?.id]
+  )
+
+  const getFilteredMatches = useCallback(
+    (gender: Gender) => matchesByGender[gender],
+    [matchesByGender]
+  )
+
+  const getUserTeams = useCallback(() => myTeams, [myTeams])
 
   const acceptRivalOpportunityWithTeam = useCallback(
     async (
@@ -1226,9 +1312,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
         fetchMatchOpportunities(supabase),
         fetchParticipatingOpportunityIds(supabase, currentUser.id),
       ])
-      setRivalChallenges(freshChallenges)
-      setMatchOpportunities(matches)
-      setParticipatingOpportunityIds(partIds)
+      setRivalChallengesStable(freshChallenges)
+      setMatchOpportunitiesStable(matches)
+      setParticipatingOpportunityIdsStable(partIds)
 
       return { ok: true }
     },
@@ -1286,8 +1372,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
           fetchParticipatingOpportunityIds(supabase, currentUser.id),
           fetchMatchOpportunities(supabase),
         ])
-        setParticipatingOpportunityIds(partIds)
-        setMatchOpportunities(matches)
+        setParticipatingOpportunityIdsStable(partIds)
+        setMatchOpportunitiesStable(matches)
       }
       return result
     },
@@ -1414,8 +1500,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
         fetchParticipatingOpportunityIds(supabase, currentUser.id),
         fetchMatchOpportunities(supabase),
       ])
-      setParticipatingOpportunityIds(partIds)
-      setMatchOpportunities(matches)
+      setParticipatingOpportunityIdsStable(partIds)
+      setMatchOpportunitiesStable(matches)
       if (invitationAccepted) {
         trackProductEvent(ProductEventNames.matchJoinSuccess, {
           userId: currentUser.id,
@@ -1433,18 +1519,13 @@ export function AppProvider({ children }: { children: ReactNode }) {
   )
 
   const getFilteredTeams = useCallback(
-    (gender: Gender) => teams.filter((t) => t.gender === gender),
-    [teams]
+    (gender: Gender) => teamsByGender[gender],
+    [teamsByGender]
   )
 
   const getFilteredUsers = useCallback(
-    (gender: Gender) => {
-      if (!currentUser) return []
-      return users.filter(
-        (u) => u.gender === gender && u.id !== currentUser.id
-      )
-    },
-    [users, currentUser]
+    (gender: Gender) => usersByGender[gender],
+    [usersByGender]
   )
 
   const refreshTeamData = useCallback(async () => {
@@ -1455,11 +1536,18 @@ export function AppProvider({ children }: { children: ReactNode }) {
       fetchTeamJoinRequestsForUser(supabase, currentUser.id),
       fetchRivalChallengesForUser(supabase, currentUser.id),
     ])
-    setTeams(teamList)
-    setTeamInvites(invites)
-    setTeamJoinRequests(joinReqs)
-    setRivalChallenges(challenges)
-  }, [currentUser, supabase])
+    setTeamsStable(teamList)
+    setTeamInvitesStable(invites)
+    setTeamJoinRequestsStable(joinReqs)
+    setRivalChallengesStable(challenges)
+  }, [
+    currentUser,
+    setRivalChallengesStable,
+    setTeamInvitesStable,
+    setTeamJoinRequestsStable,
+    setTeamsStable,
+    supabase,
+  ])
 
   const createTeam = useCallback(
     async (
@@ -1674,7 +1762,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         }
       }
       const invites = await fetchTeamInvitesForUser(supabase, currentUser.id)
-      setTeamInvites(invites)
+      setTeamInvitesStable(invites)
       return { ok: true }
     },
     [currentUser, supabase]
@@ -1744,7 +1832,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         }
       }
       const list = await fetchTeamJoinRequestsForUser(supabase, currentUser.id)
-      setTeamJoinRequests(list)
+      setTeamJoinRequestsStable(list)
       return { ok: true }
     },
     [currentUser, supabase]
@@ -1774,7 +1862,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
           .eq('id', requestId)
         if (error) return { ok: false, error: error.message }
         const list = await fetchTeamJoinRequestsForUser(supabase, currentUser.id)
-        setTeamJoinRequests(list)
+        setTeamJoinRequestsStable(list)
         return { ok: true }
       }
 
@@ -1833,7 +1921,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         .eq('id', requestId)
       if (error) return { ok: false, error: error.message }
       const list = await fetchTeamJoinRequestsForUser(supabase, currentUser.id)
-      setTeamJoinRequests(list)
+      setTeamJoinRequestsStable(list)
       return { ok: true }
     },
     [currentUser, supabase, teamJoinRequests]
@@ -1926,9 +2014,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
         fetchMatchOpportunities(supabase),
         fetchParticipatingOpportunityIds(supabase, currentUser.id),
       ])
-      setRivalChallenges(freshChallenges)
-      setMatchOpportunities(matches)
-      setParticipatingOpportunityIds(partIds)
+      setRivalChallengesStable(freshChallenges)
+      setMatchOpportunitiesStable(matches)
+      setParticipatingOpportunityIdsStable(partIds)
 
       trackProductEvent(ProductEventNames.matchJoinSuccess, {
         userId: currentUser.id,
@@ -2056,8 +2144,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
         fetchMatchOpportunities(supabase),
         fetchParticipatingOpportunityIds(supabase, currentUser.id),
       ])
-      setMatchOpportunities(matches)
-      setParticipatingOpportunityIds(partIds)
+      setMatchOpportunitiesStable(matches)
+      setParticipatingOpportunityIdsStable(partIds)
       trackProductEvent(ProductEventNames.matchCreateSuccess, {
         userId: currentUser.id,
         metadata: {
@@ -2160,8 +2248,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
         fetchMatchOpportunities(supabase),
         fetchParticipatingOpportunityIds(supabase, currentUser.id),
       ])
-      setMatchOpportunities(matches)
-      setParticipatingOpportunityIds(partIds)
+      setMatchOpportunitiesStable(matches)
+      setParticipatingOpportunityIdsStable(partIds)
 
       trackProductEvent(ProductEventNames.matchCreateSuccess, {
         userId: currentUser.id,
@@ -2313,7 +2401,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         supabase,
         currentUser.id
       )
-      setRivalChallenges(freshChallenges)
+      setRivalChallengesStable(freshChallenges)
       trackProductEvent(ProductEventNames.matchCreateSuccess, {
         userId: currentUser.id,
         metadata: {
