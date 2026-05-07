@@ -7863,6 +7863,46 @@ EXCEPTION
 END;
 $$;
 
+-- ============================================================
+-- FASE 4 (SQL + performance backend) - bloque seguro de indices
+-- Fecha: 2026-05-07
+-- Objetivo: reducir scans/sorts y contention en tablas calientes
+-- sin romper contratos RPC/RLS ni realizar cambios destructivos.
+-- ============================================================
+
+-- listados globales por fecha (fetchMatchOpportunities)
+CREATE INDEX IF NOT EXISTS idx_match_opportunities_date_time
+  ON public.match_opportunities (date_time);
+
+-- listados activos (pendientes/confirmados) con orden temporal
+CREATE INDEX IF NOT EXISTS idx_match_opportunities_active_time
+  ON public.match_opportunities (status, date_time)
+  WHERE status IN ('pending', 'confirmed');
+
+-- exploracion social de perfiles (filtro por genero + tipo cuenta)
+CREATE INDEX IF NOT EXISTS idx_profiles_gender_account_type
+  ON public.profiles (gender, account_type);
+
+-- invitaciones por invitador (backoffice/futuras vistas por emisor)
+CREATE INDEX IF NOT EXISTS idx_team_invites_inviter_created_desc
+  ON public.team_invites (inviter_id, created_at DESC);
+
+-- feed y filtros de desafios rival
+CREATE INDEX IF NOT EXISTS idx_rival_challenges_mode_status_created_desc
+  ON public.rival_challenges (mode, status, created_at DESC);
+
+-- joins/conteos por estado de participantes
+CREATE INDEX IF NOT EXISTS idx_mop_opportunity_status
+  ON public.match_opportunity_participants (opportunity_id, status);
+
+-- paginacion keyset de chat (created_at + id)
+CREATE INDEX IF NOT EXISTS idx_messages_opp_created_id_desc
+  ON public.messages (opportunity_id, created_at DESC, id DESC);
+
+-- overlap/agenda de reservas por cancha (complementa indice por starts_at)
+CREATE INDEX IF NOT EXISTS idx_venue_reservations_court_ends_at
+  ON public.venue_reservations (court_id, ends_at);
+
 REVOKE ALL ON FUNCTION public.create_team_pick_match_opportunity(
   public.match_type,
   text,
