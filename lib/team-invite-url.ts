@@ -1,3 +1,5 @@
+import { teamInviteDeepLinkFallback } from './app-linking'
+
 const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
 
@@ -10,7 +12,7 @@ export function isValidTeamInviteId(id: string): boolean {
 export function teamInviteAbsoluteUrl(teamId: string): string {
   const base = (process.env.EXPO_PUBLIC_SITE_URL || '').replace(/\/$/, '')
   if (!base) {
-    return `pichanga://equipo/${teamId}`
+    return teamInviteDeepLinkFallback(teamId)
   }
   return `${base}/equipo/${teamId}`
 }

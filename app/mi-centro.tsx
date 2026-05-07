@@ -1,8 +1,14 @@
 import { Redirect } from 'expo-router'
+import { lazy, Suspense } from 'react'
 import { ActivityIndicator, StyleSheet, View } from 'react-native'
 
-import { VenueDashboardScreen } from '../components/venue-dashboard-screen'
 import { useApp } from '../lib/app-provider'
+
+const VenueDashboardScreen = lazy(() =>
+  import('../components/venue-dashboard-screen').then((m) => ({
+    default: m.VenueDashboardScreen,
+  }))
+)
 
 export default function MiCentroRoute() {
   const { currentUser, authLoading } = useApp()
@@ -19,7 +25,17 @@ export default function MiCentroRoute() {
     return <Redirect href="/" />
   }
 
-  return <VenueDashboardScreen />
+  return (
+    <Suspense
+      fallback={
+        <View style={styles.center}>
+          <ActivityIndicator size="large" />
+        </View>
+      }
+    >
+      <VenueDashboardScreen />
+    </Suspense>
+  )
 }
 
 const styles = StyleSheet.create({

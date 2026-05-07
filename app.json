@@ -15,10 +15,12 @@
     },
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.pichanga.expo"
+      "bundleIdentifier": "com.pichanga.expo",
+      "buildNumber": "1"
     },
     "android": {
       "package": "com.pichanga.expo",
+      "versionCode": 1,
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",
         "backgroundColor": "#ffffff"
@@ -36,7 +38,14 @@
           "root": "./app"
         }
       ],
-      "expo-notifications",
+      [
+        "expo-notifications",
+        {
+          "icon": "./assets/icon.png",
+          "color": "#0F4539",
+          "defaultChannel": "default"
+        }
+      ],
       [
         "expo-image-picker",
         {

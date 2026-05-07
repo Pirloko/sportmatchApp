@@ -34,6 +34,7 @@ import type {
   User,
   VenueOnboardingData,
 } from './types'
+import { nativeAuthCallbackUrl } from './app-linking'
 import {
   DEFAULT_AVATAR,
   mapMatchOpportunityFromDb,
@@ -739,7 +740,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
             })
           }
         }
-        const redirectToNative = 'sportmatch://auth/callback'
+        const redirectToNative = nativeAuthCallbackUrl()
         const redirectToExpo = Linking.createURL('/auth/callback')
         const redirectTo = redirectToNative
         const { data, error } = await supabase.auth.signInWithOAuth({
@@ -759,7 +760,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         if (authResult.type !== 'success' || !authResult.url) {
           if (authResult.type === 'cancel') {
             return fail(
-              'Inicio con Google cancelado o callback no recibido. Verifica en Supabase Auth > URL Configuration que existan `sportmatch://auth/callback` y la URL de Expo (exp://.../--/auth/callback) en Additional Redirect URLs.',
+              `Inicio con Google cancelado o callback no recibido. Verifica en Supabase Auth > URL Configuration que existan \`${redirectToNative}\` y la URL de Expo (exp://.../--/auth/callback) en Additional Redirect URLs.`,
               { oauth_step: 'cancel_or_no_callback' }
             )
           }
@@ -768,7 +769,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
         if (isWebCallbackUrl(authResult.url)) {
           return fail(
-            'Google OAuth volvió al callback web (sportmatch.cl) en vez de la app. Ajusta Redirect URLs permitidas en Supabase para mobile (sportmatch://auth/callback y exp://.../--/auth/callback).',
+            `Google OAuth volvió al callback web (sportmatch.cl) en vez de la app. Ajusta Redirect URLs permitidas en Supabase para mobile (\`${redirectToNative}\` y exp://.../--/auth/callback).`,
             { oauth_step: 'web_callback' }
           )
         }

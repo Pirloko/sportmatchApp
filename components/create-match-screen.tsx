@@ -1,4 +1,5 @@
 import { Ionicons } from '@expo/vector-icons'
+import { FlashList, type ListRenderItemInfo } from '@shopify/flash-list'
 import { router } from 'expo-router'
 import {
   useCallback,
@@ -11,7 +12,6 @@ import {
 import {
   ActivityIndicator,
   Alert,
-  FlatList,
   Modal,
   Pressable,
   ScrollView,
@@ -402,6 +402,69 @@ export function CreateMatchScreen() {
       setVenueModal(false)
     },
     [matchType]
+  )
+
+  const renderVenueModalRow = useCallback(
+    ({ item }: ListRenderItemInfo<SportsVenue>) => (
+      <Pressable style={styles.modalRow} onPress={() => onVenuePick(item)}>
+        <Text style={[styles.modalRowText, { color: tokens.textPrimary }]}>
+          {item.name} — {item.city}
+        </Text>
+      </Pressable>
+    ),
+    [onVenuePick, tokens.textPrimary]
+  )
+
+  const renderTimeModalRow = useCallback(
+    ({ item }: ListRenderItemInfo<{ value: string; label: string }>) => (
+      <Pressable
+        style={styles.modalRow}
+        onPress={() => {
+          setBookingNoCourt(false)
+          setFormData((f) => ({ ...f, time: item.value }))
+          setTimeModal(false)
+        }}
+      >
+        <Text style={[styles.modalRowText, { color: tokens.textPrimary }]}>
+          {item.label}
+        </Text>
+      </Pressable>
+    ),
+    [tokens.textPrimary]
+  )
+
+  const renderUserTeamRow = useCallback(
+    ({ item: team }: ListRenderItemInfo<Team>) => (
+      <Pressable
+        style={[
+          styles.teamCard,
+          selectedTeam?.id === team.id && styles.teamCardOn,
+        ]}
+        onPress={() => setSelectedTeam(team)}
+      >
+        <Text style={styles.teamName}>{team.name}</Text>
+        <Text style={styles.teamMeta}>
+          {levelLabel(team.level)} · {team.members.length}/6
+        </Text>
+      </Pressable>
+    ),
+    [selectedTeam]
+  )
+
+  const renderRivalTeamRow = useCallback(
+    ({ item: team }: ListRenderItemInfo<Team>) => (
+      <Pressable
+        style={[
+          styles.teamCard,
+          selectedRivalTeam?.id === team.id && styles.teamCardRivalOn,
+        ]}
+        onPress={() => setSelectedRivalTeam(team)}
+      >
+        <Text style={styles.teamName}>{team.name}</Text>
+        <Text style={styles.teamMeta}>{levelLabel(team.level)}</Text>
+      </Pressable>
+    ),
+    [selectedRivalTeam]
   )
 
   const alternativesBlock = useMemo(
@@ -1009,21 +1072,15 @@ export function CreateMatchScreen() {
         {step === 2 && matchType === 'rival' && (
           <View style={styles.section}>
             <Text style={styles.h2}>Tu equipo</Text>
-            {userTeams.map((team) => (
-              <Pressable
-                key={team.id}
-                style={[
-                  styles.teamCard,
-                  selectedTeam?.id === team.id && styles.teamCardOn,
-                ]}
-                onPress={() => setSelectedTeam(team)}
-              >
-                <Text style={styles.teamName}>{team.name}</Text>
-                <Text style={styles.teamMeta}>
-                  {levelLabel(team.level)} · {team.members.length}/6
-                </Text>
-              </Pressable>
-            ))}
+            <View style={styles.embeddedListWrap}>
+              <FlashList
+                data={userTeams}
+                keyExtractor={(t) => t.id}
+                renderItem={renderUserTeamRow}
+                nestedScrollEnabled
+                showsVerticalScrollIndicator={false}
+              />
+            </View>
             <Pressable
               style={[styles.primaryBtn, !selectedTeam && styles.btnDisabled]}
               disabled={!selectedTeam}
@@ -1071,20 +1128,15 @@ export function CreateMatchScreen() {
                 {rivalTeams.length === 0 ? (
                   <Text style={styles.muted}>No hay equipos con ese criterio.</Text>
                 ) : (
-                  rivalTeams.map((team) => (
-                    <Pressable
-                      key={team.id}
-                      style={[
-                        styles.teamCard,
-                        selectedRivalTeam?.id === team.id &&
-                          styles.teamCardRivalOn,
-                      ]}
-                      onPress={() => setSelectedRivalTeam(team)}
-                    >
-                      <Text style={styles.teamName}>{team.name}</Text>
-                      <Text style={styles.teamMeta}>{levelLabel(team.level)}</Text>
-                    </Pressable>
-                  ))
+                  <View style={styles.embeddedListWrap}>
+                    <FlashList
+                      data={rivalTeams}
+                      keyExtractor={(t) => t.id}
+                      renderItem={renderRivalTeamRow}
+                      nestedScrollEnabled
+                      showsVerticalScrollIndicator={false}
+                    />
+                  </View>
                 )}
               </>
             )}
@@ -2184,25 +2236,18 @@ export function CreateMatchScreen() {
             >
               Centro deportivo
             </Text>
-            <FlatList
-              data={sportsVenuesFromDb}
-              keyExtractor={(v) => v.id}
-              renderItem={({ item }) => (
-                <Pressable
-                  style={styles.modalRow}
-                  onPress={() => onVenuePick(item)}
-                >
-                  <Text style={[styles.modalRowText, { color: tokens.textPrimary }]}>
-                    {item.name} — {item.city}
+            <View style={styles.modalListWrap}>
+              <FlashList
+                data={sportsVenuesFromDb}
+                keyExtractor={(v) => v.id}
+                renderItem={renderVenueModalRow}
+                ListEmptyComponent={
+                  <Text style={[styles.muted, { color: tokens.textMuted }]}>
+                    No hay centros registrados.
                   </Text>
-                </Pressable>
-              )}
-              ListEmptyComponent={
-                <Text style={[styles.muted, { color: tokens.textMuted }]}>
-                  No hay centros registrados.
-                </Text>
-              }
-            />
+                }
+              />
+            </View>
             <Pressable
               style={styles.modalClose}
               onPress={() => setVenueModal(false)}
@@ -2237,29 +2282,18 @@ export function CreateMatchScreen() {
             {linkedVenueId && formData.date && loadingVenueTimes ? (
               <ActivityIndicator style={{ margin: 24 }} color={tokens.primaryGreen} />
             ) : (
-              <FlatList
-                data={timeOptionsForPicker}
-                keyExtractor={(x) => x.value}
-                renderItem={({ item }) => (
-                  <Pressable
-                    style={styles.modalRow}
-                    onPress={() => {
-                      setBookingNoCourt(false)
-                      setFormData((f) => ({ ...f, time: item.value }))
-                      setTimeModal(false)
-                    }}
-                  >
-                    <Text style={[styles.modalRowText, { color: tokens.textPrimary }]}>
-                      {item.label}
+              <View style={styles.modalListWrap}>
+                <FlashList
+                  data={timeOptionsForPicker}
+                  keyExtractor={(x) => x.value}
+                  renderItem={renderTimeModalRow}
+                  ListEmptyComponent={
+                    <Text style={[styles.muted, { color: tokens.textMuted }]}>
+                      Sin horarios.
                     </Text>
-                  </Pressable>
-                )}
-                ListEmptyComponent={
-                  <Text style={[styles.muted, { color: tokens.textMuted }]}>
-                    Sin horarios.
-                  </Text>
-                }
-              />
+                  }
+                />
+              </View>
             )}
             <Pressable
               style={styles.modalClose}
@@ -2775,6 +2809,12 @@ const styles = StyleSheet.create({
     borderTopRightRadius: 16,
     maxHeight: '70%',
     paddingBottom: 24,
+  },
+  modalListWrap: {
+    maxHeight: 340,
+  },
+  embeddedListWrap: {
+    maxHeight: 380,
   },
   modalTitle: {
     fontSize: 17,

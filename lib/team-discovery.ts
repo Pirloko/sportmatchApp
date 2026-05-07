@@ -28,7 +28,12 @@ export function teamIsInPlayerGeo(user: User, team: Team): boolean {
     if (user.homeRegionId === team.homeRegionId) return true
   }
   if (user.cityId && team.cityId && user.cityId === team.cityId) return true
-  if (userCityKey && teamCityKey && userCityKey === teamCityKey) return true
+  if (userCityKey && teamCityKey) {
+    if (userCityKey === teamCityKey) return true
+    // Permite "rancagua" vs "rancagua ohiggins" o variantes similares
+    if (teamCityKey.includes(userCityKey)) return true
+    if (userCityKey.includes(teamCityKey)) return true
+  }
   return false
 }
 

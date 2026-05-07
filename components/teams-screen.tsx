@@ -1,11 +1,12 @@
 import { Ionicons } from '@expo/vector-icons'
+import { FlashList, type ListRenderItemInfo } from '@shopify/flash-list'
 import * as ImagePicker from 'expo-image-picker'
+import { Image } from 'expo-image'
 import { router } from 'expo-router'
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import {
   ActivityIndicator,
   Alert,
-  Image,
   Linking,
   Pressable,
   ScrollView,
@@ -469,7 +470,11 @@ export function TeamsScreen() {
             ]}
           >
             {team.logo ? (
-              <Image source={{ uri: team.logo }} style={styles.logoImg} />
+              <Image
+                source={{ uri: team.logo }}
+                style={styles.logoImg}
+                contentFit="cover"
+              />
             ) : (
               <Ionicons name="shield" size={26} color={tokens.primaryGreen} />
             )}
@@ -551,7 +556,11 @@ export function TeamsScreen() {
               ]}
             >
               {team.logo ? (
-                <Image source={{ uri: team.logo }} style={styles.logoImg} />
+                <Image
+                  source={{ uri: team.logo }}
+                  style={styles.logoImg}
+                  contentFit="cover"
+                />
               ) : (
                 <Ionicons name="shield" size={28} color={tokens.primaryGreen} />
               )}
@@ -723,6 +732,12 @@ export function TeamsScreen() {
     )
   }
 
+  const renderDiscoverListItem = useCallback(
+    ({ item, index }: ListRenderItemInfo<Team>) =>
+      renderDiscoverTeamCard(item, discoverTab === 'ranking' ? index + 1 : null),
+    [discoverTab, renderDiscoverTeamCard]
+  )
+
   const onRivalChallenge = async (c: RivalChallenge, accept: boolean) => {
     const myTeamId =
       c.mode === 'open' ? challengeTeamPick[c.id] : undefined
@@ -831,7 +846,11 @@ export function TeamsScreen() {
             )
             return (
               <View key={user.id} style={styles.inviteRow}>
-                <Image source={{ uri: user.photo }} style={styles.avatar} />
+                <Image
+                  source={{ uri: user.photo }}
+                  style={styles.avatar}
+                  contentFit="cover"
+                />
                 <View style={{ flex: 1 }}>
                   <Text style={styles.inviteName}>{user.name}</Text>
                   <Text style={styles.inviteMeta}>
@@ -891,7 +910,11 @@ export function TeamsScreen() {
             <Pressable onPress={isCaptain ? () => void pickLogo() : undefined}>
               <View style={styles.detailLogo}>
                 {team.logo ? (
-                  <Image source={{ uri: team.logo }} style={styles.detailLogoImg} />
+                  <Image
+                    source={{ uri: team.logo }}
+                    style={styles.detailLogoImg}
+                    contentFit="cover"
+                  />
                 ) : (
                   <Ionicons name="shield" size={40} color="#2563eb" />
                 )}
@@ -983,7 +1006,11 @@ export function TeamsScreen() {
               </Text>
               {incomingJoin.map((r: TeamJoinRequest) => (
                 <View key={r.id} style={styles.joinRow}>
-                  <Image source={{ uri: r.requesterPhoto }} style={styles.avatar} />
+                  <Image
+                    source={{ uri: r.requesterPhoto }}
+                    style={styles.avatar}
+                    contentFit="cover"
+                  />
                   <Text style={styles.inviteName} numberOfLines={1}>
                     {r.requesterName}
                   </Text>
@@ -1168,7 +1195,11 @@ export function TeamsScreen() {
 
           {team.members.map((member) => (
             <View key={member.id} style={styles.memberRow}>
-              <Image source={{ uri: member.photo }} style={styles.avatar} />
+              <Image
+                source={{ uri: member.photo }}
+                style={styles.avatar}
+                contentFit="cover"
+              />
               <View style={{ flex: 1 }}>
                 <View style={styles.cardTitleRow}>
                   <Text style={styles.inviteName}>{member.name}</Text>
@@ -1264,7 +1295,11 @@ export function TeamsScreen() {
             {pendingJoinForCaptain.map((r) => (
               <View key={r.id} style={styles.inviteCard}>
                 <View style={styles.joinRow}>
-                  <Image source={{ uri: r.requesterPhoto }} style={styles.avatar} />
+                  <Image
+                    source={{ uri: r.requesterPhoto }}
+                    style={styles.avatar}
+                    contentFit="cover"
+                  />
                   <View style={{ flex: 1 }}>
                     <Text style={styles.inviteName}>{r.teamName}</Text>
                     <Text style={styles.inviteMeta}>{r.requesterName}</Text>
@@ -1486,9 +1521,15 @@ export function TeamsScreen() {
               : 'Mismos equipos elegibles, ordenados por rendimiento rival: más V, luego más E y menos D.'}
           </Text>
           {discoverList.length > 0 ? (
-            discoverList.map((t, idx) =>
-              renderDiscoverTeamCard(t, discoverTab === 'ranking' ? idx + 1 : null)
-            )
+            <View style={styles.discoverListWrap}>
+              <FlashList
+                data={discoverList}
+                keyExtractor={(item) => item.id}
+                renderItem={renderDiscoverListItem}
+                nestedScrollEnabled
+                showsVerticalScrollIndicator={false}
+              />
+            </View>
           ) : (
             <Text style={[styles.muted, { color: tokens.textMuted }]}>
               No hay equipos disponibles con tus filtros de ubicación y género.
@@ -1567,6 +1608,9 @@ const styles = StyleSheet.create({
   outlineBtnSmText: { fontSize: 14, fontWeight: '600', color: '#374151' },
   btnDisabled: { opacity: 0.45 },
   block: { marginBottom: 24 },
+  discoverListWrap: {
+    maxHeight: 580,
+  },
   blockHead: {
     flexDirection: 'row',
     justifyContent: 'space-between',

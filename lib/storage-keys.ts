@@ -9,5 +9,5 @@ export const CREATE_PREFILL_STORAGE_KEY = 'pichanga_create_prefill'
 export const PLAYER_LAST_NAV_STORAGE_KEY = 'pichanga-last-nav-screen'
 /** Equipo rival preseleccionado al pulsar «Desafiar» desde equipos. */
 export const RIVAL_TARGET_TEAM_STORAGE_KEY = 'pichanga_rival_target_team'
-/** Deep link `pichanga://equipo/...` antes de iniciar sesión; se consume al entrar como jugador. */
+/** Deep link `sportmatch://equipo/...` (esquema en app.json) antes de iniciar sesión; se consume al entrar como jugador. */
 export const PENDING_TEAM_FOCUS_STORAGE_KEY = 'pichanga-pending-team-focus'

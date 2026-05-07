@@ -1,9 +1,7 @@
 import { router, useLocalSearchParams } from 'expo-router'
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import {
   Alert,
-  FlatList,
-  type ListRenderItem,
   Pressable,
   RefreshControl,
   StyleSheet,
@@ -11,6 +9,7 @@ import {
   View,
 } from 'react-native'
 import { Ionicons } from '@expo/vector-icons'
+import { FlashList, type ListRenderItem } from '@shopify/flash-list'
 import { SafeAreaView } from 'react-native-safe-area-context'
 
 import {
@@ -59,49 +58,53 @@ export function MatchesHubScreen() {
   )
   const { resolved } = useThemePreference()
   const isDark = resolved === 'dark'
-  const ui = isDark
-    ? {
-        bg: '#0F1115',
-        surface: '#171B22',
-        surfaceAlt: '#202630',
-        border: '#2C3340',
-        text: '#F3F6FB',
-        muted: '#A2ACB8',
-        tabOnBg: '#66D06F',
-        tabOnText: '#0D0F0E',
-        badgeBg: 'rgba(102, 208, 111, 0.25)',
-        cardHeadBg: '#2A3038',
-        cardHeadText: '#E8EDF5',
-        detailBtnBg: '#F3F6FB',
-        detailBtnText: '#0D0F0E',
-        progressTrack: '#2A323E',
-        sectionSoft: '#27313C',
-        underline: '#66D06F',
-        chipBg: '#171B22',
-        chipBorder: '#2C3340',
-        shadow: '#000000',
-      }
-    : {
-        bg: '#F4F7F2',
-        surface: '#FFFFFF',
-        surfaceAlt: '#EEF3EC',
-        border: '#CFD8CE',
-        text: '#1F2A22',
-        muted: '#667267',
-        tabOnBg: '#0F4539',
-        tabOnText: '#FFFFFF',
-        badgeBg: 'rgba(47, 158, 68, 0.20)',
-        cardHeadBg: '#F2EBCF',
-        cardHeadText: '#4A3D1F',
-        detailBtnBg: '#0D0F0E',
-        detailBtnText: '#FFFFFF',
-        progressTrack: '#DEE7DD',
-        sectionSoft: '#F6F0DA',
-        underline: '#0F4539',
-        chipBg: '#FFFFFF',
-        chipBorder: '#CFD8CE',
-        shadow: '#0F172A',
-      }
+  const ui = useMemo(
+    () =>
+      isDark
+        ? {
+            bg: '#0F1115',
+            surface: '#171B22',
+            surfaceAlt: '#202630',
+            border: '#2C3340',
+            text: '#F3F6FB',
+            muted: '#A2ACB8',
+            tabOnBg: '#66D06F',
+            tabOnText: '#0D0F0E',
+            badgeBg: 'rgba(102, 208, 111, 0.25)',
+            cardHeadBg: '#2A3038',
+            cardHeadText: '#E8EDF5',
+            detailBtnBg: '#F3F6FB',
+            detailBtnText: '#0D0F0E',
+            progressTrack: '#2A323E',
+            sectionSoft: '#27313C',
+            underline: '#66D06F',
+            chipBg: '#171B22',
+            chipBorder: '#2C3340',
+            shadow: '#000000',
+          }
+        : {
+            bg: '#F4F7F2',
+            surface: '#FFFFFF',
+            surfaceAlt: '#EEF3EC',
+            border: '#CFD8CE',
+            text: '#1F2A22',
+            muted: '#667267',
+            tabOnBg: '#0F4539',
+            tabOnText: '#FFFFFF',
+            badgeBg: 'rgba(47, 158, 68, 0.20)',
+            cardHeadBg: '#F2EBCF',
+            cardHeadText: '#4A3D1F',
+            detailBtnBg: '#0D0F0E',
+            detailBtnText: '#FFFFFF',
+            progressTrack: '#DEE7DD',
+            sectionSoft: '#F6F0DA',
+            underline: '#0F4539',
+            chipBg: '#FFFFFF',
+            chipBorder: '#CFD8CE',
+            shadow: '#0F172A',
+          },
+    [isDark]
+  )
   const currentUserId = currentUser?.id ?? null
 
   useEffect(() => {
@@ -246,7 +249,8 @@ export function MatchesHubScreen() {
     }
   }
 
-  const renderItem: ListRenderItem<MatchOpportunity> = ({ item: m }) => {
+  const renderItem = useCallback<ListRenderItem<MatchOpportunity>>(
+    ({ item: m }) => {
     const isPast =
       m.status === 'completed' ||
       m.status === 'cancelled' ||
@@ -440,7 +444,18 @@ export function MatchesHubScreen() {
         ) : null}
       </Pressable>
     )
-  }
+    },
+    [
+      tab,
+      midnight,
+      lastByOpp,
+      currentUserId,
+      respondingInvitationId,
+      ui,
+      respondToMatchInvitation,
+      isDark,
+    ]
+  )
 
   if (!currentUser || currentUser.accountType !== 'player') {
     return (
@@ -514,7 +529,7 @@ export function MatchesHubScreen() {
         />
       </View>
 
-      <FlatList
+      <FlashList
         data={data}
         keyExtractor={(m) => m.id}
         renderItem={renderItem}
