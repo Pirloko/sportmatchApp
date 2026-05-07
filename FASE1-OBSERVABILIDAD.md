@@ -34,7 +34,7 @@ Observabilidad mínima profesional: **Sentry** (opcional por DSN) + eventos de p
 | `login_failed` | email/Google, fallos y excepciones |
 | `signup_success` | registro exitoso (flag `is_signup`) |
 | `match_create_success` | `addMatchOpportunity`, `createTeamPickMatchOpportunity`, `createRivalChallenge` |
-| `match_join_success` | `joinMatchOpportunity`, aceptar invitación |
+| `match_join_success` | `joinMatchOpportunity`, aceptar invitación, aceptar desafío rival |
 | `chat_message_sent` | `chat-screen` tras insert OK |
 | `booking_success` | reserva en crear partido, team pick con cancha, `reserveVenueOnly` |
 | `push_received` | notificación en foreground (`addNotificationReceivedListener`) |

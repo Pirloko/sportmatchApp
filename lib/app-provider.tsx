@@ -1930,6 +1930,16 @@ export function AppProvider({ children }: { children: ReactNode }) {
       setMatchOpportunities(matches)
       setParticipatingOpportunityIds(partIds)
 
+      trackProductEvent(ProductEventNames.matchJoinSuccess, {
+        userId: currentUser.id,
+        metadata: {
+          source: 'rival_accept',
+          opportunity_id: challenge.opportunityId,
+          match_type: 'rival',
+        },
+        supabase,
+      })
+
       return { ok: true, chatOpportunityId: challenge.opportunityId }
     },
     [
