@@ -38,6 +38,11 @@ import {
   type MatchOpportunityRow,
 } from './supabase/mappers'
 import { createClient, isSupabaseConfigured } from './supabase/client'
+import {
+  ProductEventNames,
+  setAnalyticsUser,
+  trackProductEvent,
+} from './telemetry/product-analytics'
 import { formatAuthError } from './supabase/auth-errors'
 import {
   fetchMatchOpportunities,
@@ -388,6 +393,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const hydrateFromSession = useCallback(
     async (client: SupabaseClient, session: Session | null) => {
       if (!session?.user) {
+        setAnalyticsUser(null)
         setCurrentUser(null)
         clearLists()
         return
@@ -397,6 +403,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       const email =
         authUser.email?.trim() || getAuthUserEmail(authUser)?.trim() || ''
       if (!email) {
+        setAnalyticsUser(null)
         setCurrentUser(null)
         clearLists()
         return
@@ -404,12 +411,14 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
       const profile = await fetchProfileForUser(client, authUser.id, email)
       if (!profile) {
+        setAnalyticsUser(null)
         setCurrentUser(null)
         clearLists()
         return
       }
 
       setCurrentUser(profile)
+      setAnalyticsUser({ id: profile.id, email: profile.email })
 
       if (profile.accountType === 'admin') {
         clearLists()
@@ -449,6 +458,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       async (event, session) => {
         if (!mounted) return
         if (event === 'SIGNED_OUT') {
+          setAnalyticsUser(null)
           setCurrentUser(null)
           clearLists()
           return
@@ -474,6 +484,14 @@ export function AppProvider({ children }: { children: ReactNode }) {
       whatsappPhone?: string
     ): Promise<LoginResult> => {
       if (!isSupabaseConfigured() || !supabase) {
+        trackProductEvent(ProductEventNames.loginFailed, {
+          userId: null,
+          metadata: {
+            method: 'email_password',
+            is_signup: isSignUp,
+            error_message: 'supabase_not_configured',
+          },
+        })
         return {
           ok: false,
           error:
@@ -481,6 +499,41 @@ export function AppProvider({ children }: { children: ReactNode }) {
         }
       }
       try {
+        const fail = (msg: string, extra?: Record<string, unknown>): LoginResult => {
+          trackProductEvent(ProductEventNames.loginFailed, {
+            userId: null,
+            metadata: {
+              method: 'email_password',
+              is_signup: isSignUp,
+              error_message: msg.slice(0, 400),
+              ...extra,
+            },
+            supabase,
+          })
+          return { ok: false, error: msg }
+        }
+        const recordAuthSuccess = (profile: User) => {
+          setAnalyticsUser({ id: profile.id, email: profile.email })
+          trackProductEvent(ProductEventNames.loginSuccess, {
+            userId: profile.id,
+            metadata: {
+              method: 'email_password',
+              account_type: profile.accountType ?? 'player',
+              is_signup: isSignUp,
+            },
+            supabase,
+          })
+          if (isSignUp) {
+            trackProductEvent(ProductEventNames.signupSuccess, {
+              userId: profile.id,
+              metadata: {
+                method: 'email_password',
+                account_type: profile.accountType ?? 'player',
+              },
+              supabase,
+            })
+          }
+        }
         const emailTrimmed = email.trim()
         if (isSignUp) {
           const whatsapp = whatsappPhone?.trim() ?? ''
@@ -491,13 +544,12 @@ export function AppProvider({ children }: { children: ReactNode }) {
               data: whatsapp ? { gender, whatsapp_phone: whatsapp } : { gender },
             },
           })
-          if (error) return { ok: false, error: formatAuthError(error) }
+          if (error) return fail(formatAuthError(error))
           if (data.user && !data.session) {
-            return {
-              ok: false,
-              error:
-                'Revisa tu correo para confirmar la cuenta antes de iniciar sesión.',
-            }
+            return fail(
+              'Revisa tu correo para confirmar la cuenta antes de iniciar sesión.',
+              { reason: 'email_confirmation_pending' }
+            )
           }
           if (data.user) {
             await supabase
@@ -510,27 +562,28 @@ export function AppProvider({ children }: { children: ReactNode }) {
             email: emailTrimmed,
             password,
           })
-          if (error) return { ok: false, error: formatAuthError(error) }
+          if (error) return fail(formatAuthError(error))
         }
 
         const {
           data: { user },
         } = await supabase.auth.getUser()
         if (!user) {
-          return { ok: false, error: 'No se pudo obtener la sesión.' }
+          return fail('No se pudo obtener la sesión.')
         }
 
         const userEmail = user.email ?? getAuthUserEmail(user)
         if (!userEmail) {
-          return { ok: false, error: 'No se pudo obtener la sesión.' }
+          return fail('No se pudo obtener la sesión.')
         }
 
         const profile = await fetchProfileForUser(supabase, user.id, userEmail)
         if (!profile) {
-          return { ok: false, error: 'No se encontró el perfil.' }
+          return fail('No se encontró el perfil.')
         }
 
         setCurrentUser(profile)
+        recordAuthSuccess(profile)
 
         if (profile.accountType === 'admin') {
           clearLists()
@@ -564,6 +617,16 @@ export function AppProvider({ children }: { children: ReactNode }) {
         }
       } catch (e) {
         const msg = e instanceof Error ? e.message : 'Error de conexión'
+        trackProductEvent(ProductEventNames.loginFailed, {
+          userId: null,
+          metadata: {
+            method: 'email_password',
+            is_signup: isSignUp,
+            error_message: msg.slice(0, 400),
+            reason: 'exception',
+          },
+          supabase,
+        })
         return { ok: false, error: msg }
       }
     },
@@ -573,6 +636,14 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const loginWithGoogle = useCallback(
     async (isSignUp: boolean): Promise<LoginResult> => {
       if (!isSupabaseConfigured() || !supabase) {
+        trackProductEvent(ProductEventNames.loginFailed, {
+          userId: null,
+          metadata: {
+            method: 'google',
+            is_signup: isSignUp,
+            error_message: 'supabase_not_configured',
+          },
+        })
         return {
           ok: false,
           error:
@@ -580,6 +651,41 @@ export function AppProvider({ children }: { children: ReactNode }) {
         }
       }
       try {
+        const fail = (msg: string, extra?: Record<string, unknown>): LoginResult => {
+          trackProductEvent(ProductEventNames.loginFailed, {
+            userId: null,
+            metadata: {
+              method: 'google',
+              is_signup: isSignUp,
+              error_message: msg.slice(0, 400),
+              ...extra,
+            },
+            supabase,
+          })
+          return { ok: false, error: msg }
+        }
+        const recordAuthSuccess = (profile: User) => {
+          setAnalyticsUser({ id: profile.id, email: profile.email })
+          trackProductEvent(ProductEventNames.loginSuccess, {
+            userId: profile.id,
+            metadata: {
+              method: 'google',
+              account_type: profile.accountType ?? 'player',
+              is_signup: isSignUp,
+            },
+            supabase,
+          })
+          if (isSignUp) {
+            trackProductEvent(ProductEventNames.signupSuccess, {
+              userId: profile.id,
+              metadata: {
+                method: 'google',
+                account_type: profile.accountType ?? 'player',
+              },
+              supabase,
+            })
+          }
+        }
         const redirectToNative = 'sportmatch://auth/callback'
         const redirectToExpo = Linking.createURL('/auth/callback')
         const redirectTo = redirectToNative
@@ -591,67 +697,64 @@ export function AppProvider({ children }: { children: ReactNode }) {
             queryParams: isSignUp ? { prompt: 'consent' } : undefined,
           },
         })
-        if (error) return { ok: false, error: formatAuthError(error) }
+        if (error) return fail(formatAuthError(error))
         if (!data?.url) {
-          return { ok: false, error: 'No se pudo iniciar Google OAuth.' }
+          return fail('No se pudo iniciar Google OAuth.')
         }
 
         const authResult = await WebBrowser.openAuthSessionAsync(data.url, redirectToExpo)
         if (authResult.type !== 'success' || !authResult.url) {
           if (authResult.type === 'cancel') {
-            return {
-              ok: false,
-              error:
-                'Inicio con Google cancelado o callback no recibido. Verifica en Supabase Auth > URL Configuration que existan `sportmatch://auth/callback` y la URL de Expo (exp://.../--/auth/callback) en Additional Redirect URLs.',
-            }
+            return fail(
+              'Inicio con Google cancelado o callback no recibido. Verifica en Supabase Auth > URL Configuration que existan `sportmatch://auth/callback` y la URL de Expo (exp://.../--/auth/callback) en Additional Redirect URLs.',
+              { oauth_step: 'cancel_or_no_callback' }
+            )
           }
-          return { ok: false, error: 'Inicio con Google cancelado.' }
+          return fail('Inicio con Google cancelado.', { oauth_step: 'not_success' })
         }
 
         if (isWebCallbackUrl(authResult.url)) {
-          return {
-            ok: false,
-            error:
-              'Google OAuth volvió al callback web (sportmatch.cl) en vez de la app. Ajusta Redirect URLs permitidas en Supabase para mobile (sportmatch://auth/callback y exp://.../--/auth/callback).',
-          }
+          return fail(
+            'Google OAuth volvió al callback web (sportmatch.cl) en vez de la app. Ajusta Redirect URLs permitidas en Supabase para mobile (sportmatch://auth/callback y exp://.../--/auth/callback).',
+            { oauth_step: 'web_callback' }
+          )
         }
 
         const { accessToken, refreshToken } = extractTokensFromRedirect(authResult.url)
         if (!accessToken || !refreshToken) {
-          return {
-            ok: false,
-            error: 'No se recibieron tokens de autenticación de Google.',
-          }
+          return fail('No se recibieron tokens de autenticación de Google.', {
+            oauth_step: 'missing_tokens',
+          })
         }
 
         const { error: sessionError } = await supabase.auth.setSession({
           access_token: accessToken,
           refresh_token: refreshToken,
         })
-        if (sessionError) return { ok: false, error: formatAuthError(sessionError) }
+        if (sessionError) return fail(formatAuthError(sessionError))
 
         const {
           data: { user },
         } = await supabase.auth.getUser()
         if (!user) {
-          return { ok: false, error: 'No se pudo obtener la sesión.' }
+          return fail('No se pudo obtener la sesión.')
         }
 
         const userEmail = user.email ?? getAuthUserEmail(user)
         if (!userEmail) {
-          return { ok: false, error: 'No se pudo obtener el email de la sesión.' }
+          return fail('No se pudo obtener el email de la sesión.')
         }
 
         const profile = await fetchProfileForUser(supabase, user.id, userEmail)
         if (!profile) {
-          return {
-            ok: false,
-            error:
-              'El usuario autenticó con Google, pero no existe perfil en la base. Revisa trigger/proceso de alta de perfiles en Supabase.',
-          }
+          return fail(
+            'El usuario autenticó con Google, pero no existe perfil en la base. Revisa trigger/proceso de alta de perfiles en Supabase.',
+            { reason: 'profile_missing' }
+          )
         }
 
         setCurrentUser(profile)
+        recordAuthSuccess(profile)
 
         if (profile.accountType === 'admin') {
           clearLists()
@@ -684,6 +787,16 @@ export function AppProvider({ children }: { children: ReactNode }) {
         }
       } catch (e) {
         const msg = e instanceof Error ? e.message : 'Error de conexión'
+        trackProductEvent(ProductEventNames.loginFailed, {
+          userId: null,
+          metadata: {
+            method: 'google',
+            is_signup: isSignUp,
+            error_message: msg.slice(0, 400),
+            reason: 'exception',
+          },
+          supabase,
+        })
         return { ok: false, error: msg }
       }
     },
@@ -1160,6 +1273,15 @@ export function AppProvider({ children }: { children: ReactNode }) {
         options
       )
       if (result.ok) {
+        trackProductEvent(ProductEventNames.matchJoinSuccess, {
+          userId: currentUser.id,
+          metadata: {
+            source: 'direct_join',
+            opportunity_id: opportunityId,
+            match_type: opp.type,
+          },
+          supabase,
+        })
         const [partIds, matches] = await Promise.all([
           fetchParticipatingOpportunityIds(supabase, currentUser.id),
           fetchMatchOpportunities(supabase),
@@ -1210,6 +1332,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         }
       }
 
+      let invitationAccepted = false
       if (!accept) {
         const { error } = await supabase
           .from('match_opportunity_participants')
@@ -1284,6 +1407,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
           .eq('user_id', currentUser.id)
           .eq('status', 'invited')
         if (error) return { ok: false, error: error.message }
+        invitationAccepted = true
       }
 
       const [partIds, matches] = await Promise.all([
@@ -1292,6 +1416,17 @@ export function AppProvider({ children }: { children: ReactNode }) {
       ])
       setParticipatingOpportunityIds(partIds)
       setMatchOpportunities(matches)
+      if (invitationAccepted) {
+        trackProductEvent(ProductEventNames.matchJoinSuccess, {
+          userId: currentUser.id,
+          metadata: {
+            source: 'invitation_accept',
+            opportunity_id: opportunityId,
+            match_type: opp.type,
+          },
+          supabase,
+        })
+      }
       return { ok: true }
     },
     [currentUser, supabase, matchOpportunities, teams]
@@ -1913,6 +2048,26 @@ export function AppProvider({ children }: { children: ReactNode }) {
       ])
       setMatchOpportunities(matches)
       setParticipatingOpportunityIds(partIds)
+      trackProductEvent(ProductEventNames.matchCreateSuccess, {
+        userId: currentUser.id,
+        metadata: {
+          match_type: m.type,
+          opportunity_id: oppId,
+          booked_venue: Boolean(reservationId),
+        },
+        supabase,
+      })
+      if (reservationId) {
+        trackProductEvent(ProductEventNames.bookingSuccess, {
+          userId: currentUser.id,
+          metadata: {
+            context: 'match_create',
+            reservation_id: reservationId,
+            opportunity_id: oppId,
+          },
+          supabase,
+        })
+      }
       return { ok: true }
     },
     [currentUser, supabase]
@@ -1998,6 +2153,23 @@ export function AppProvider({ children }: { children: ReactNode }) {
       setMatchOpportunities(matches)
       setParticipatingOpportunityIds(partIds)
 
+      trackProductEvent(ProductEventNames.matchCreateSuccess, {
+        userId: currentUser.id,
+        metadata: {
+          match_type: p.type,
+          team_pick: true,
+          booked_venue: p.bookCourtSlot,
+        },
+        supabase,
+      })
+      if (p.bookCourtSlot) {
+        trackProductEvent(ProductEventNames.bookingSuccess, {
+          userId: currentUser.id,
+          metadata: { context: 'team_pick_create', match_type: p.type },
+          supabase,
+        })
+      }
+
       return {
         ok: true,
         joinCode:
@@ -2039,6 +2211,14 @@ export function AppProvider({ children }: { children: ReactNode }) {
         }
         return { ok: false, error: error.message }
       }
+      trackProductEvent(ProductEventNames.bookingSuccess, {
+        userId: currentUser.id,
+        metadata: {
+          context: 'venue_only',
+          venue_id: sportsVenueId,
+        },
+        supabase,
+      })
       return { ok: true }
     },
     [currentUser, supabase]
@@ -2124,12 +2304,22 @@ export function AppProvider({ children }: { children: ReactNode }) {
         currentUser.id
       )
       setRivalChallenges(freshChallenges)
+      trackProductEvent(ProductEventNames.matchCreateSuccess, {
+        userId: currentUser.id,
+        metadata: {
+          match_type: 'rival',
+          opportunity_id: oppData.id,
+          rival_mode: payload.mode,
+        },
+        supabase,
+      })
       return { ok: true }
     },
     [currentUser, supabase]
   )
 
   const logout = useCallback(async () => {
+    setAnalyticsUser(null)
     try {
       if (isSupabaseConfigured() && supabase) {
         await supabase.auth.signOut()

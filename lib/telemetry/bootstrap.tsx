@@ -4,7 +4,12 @@ import { useEffect, useRef } from 'react'
 
 import { useApp } from '../app-provider'
 import { createClient, isSupabaseConfigured } from '../supabase/client'
-import { trackCrash, trackEvent } from './client'
+import { trackCrash } from './client'
+import {
+  captureProductException,
+  ProductEventNames,
+  trackProductEvent,
+} from './product-analytics'
 
 type GlobalLike = {
   ErrorUtils?: {
@@ -24,13 +29,13 @@ export function TelemetryBootstrap() {
     if (startedRef.current) return
     startedRef.current = true
     const supabase = createClient()
-    void trackEvent(supabase, {
+    trackProductEvent(ProductEventNames.appStarted, {
       userId: currentUser?.id ?? null,
-      eventName: 'app_started',
       metadata: {
         appVersion: Constants.expoConfig?.version ?? 'unknown',
         runtimeVersion: Constants.expoRuntimeVersion ?? 'unknown',
       },
+      supabase,
     })
   }, [currentUser?.id])
 
@@ -40,10 +45,10 @@ export function TelemetryBootstrap() {
     if (prevPathRef.current === pathname) return
     prevPathRef.current = pathname
     const supabase = createClient()
-    void trackEvent(supabase, {
+    trackProductEvent(ProductEventNames.screenView, {
       userId: currentUser?.id ?? null,
-      eventName: 'screen_view',
       metadata: { pathname },
+      supabase,
     })
   }, [pathname, currentUser?.id])
 
@@ -55,6 +60,9 @@ export function TelemetryBootstrap() {
     if (!errorUtils?.setGlobalHandler) return
 
     errorUtils.setGlobalHandler((error: Error, isFatal?: boolean) => {
+      captureProductException(error, {
+        extra: { isFatal: Boolean(isFatal), pathname: prevPathRef.current },
+      })
       const supabase = createClient()
       void trackCrash(supabase, {
         userId: currentUser?.id ?? null,

@@ -23,6 +23,10 @@ import {
 } from '../lib/format-match'
 import { useApp } from '../lib/app-provider'
 import { useThemePreference } from '../lib/theme-context'
+import {
+  ProductEventNames,
+  trackProductEvent,
+} from '../lib/telemetry/product-analytics'
 import { createClient, isSupabaseConfigured } from '../lib/supabase/client'
 import {
   fetchMessagesForOpportunity,
@@ -236,6 +240,12 @@ export function ChatScreen() {
       Alert.alert('Error', error.message)
       return
     }
+
+    trackProductEvent(ProductEventNames.chatMessageSent, {
+      userId: currentUser.id,
+      metadata: { opportunity_id: opportunityId },
+      supabase,
+    })
 
     setNewMessage('')
     void loadMessages()

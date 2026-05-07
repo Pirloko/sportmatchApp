@@ -1,13 +1,16 @@
 import { useEffect, useRef } from 'react'
 import { router } from 'expo-router'
 // Importar submódulos evita cargar DevicePushTokenAutoRegistration.fx (rompe Expo Go Android SDK 53+).
-import { addNotificationResponseReceivedListener } from 'expo-notifications/build/NotificationsEmitter'
+import {
+  addNotificationReceivedListener,
+  addNotificationResponseReceivedListener,
+} from 'expo-notifications/build/NotificationsEmitter'
 import { setNotificationHandler } from 'expo-notifications/build/NotificationsHandler'
 
 import { useApp } from '../app-provider'
 import { createClient, isSupabaseConfigured } from '../supabase/client'
 import { registerDevicePushToken } from './register-device'
-import { trackEvent } from '../telemetry/client'
+import { ProductEventNames, trackProductEvent } from '../telemetry/product-analytics'
 
 type NotificationData = {
   route?: string
@@ -55,30 +58,61 @@ export function PushBootstrap() {
     void (async () => {
       const res = await registerDevicePushToken(supabase, currentUser.id)
       if (res.ok) {
-        await trackEvent(supabase, {
+        trackProductEvent(ProductEventNames.pushTokenRegistered, {
           userId: currentUser.id,
-          eventName: 'push_token_registered',
+          supabase,
         })
       } else {
-        await trackEvent(supabase, {
+        trackProductEvent(ProductEventNames.pushTokenFailed, {
           userId: currentUser.id,
-          eventName: 'push_token_failed',
           metadata: { reason: res.reason },
+          supabase,
         })
       }
     })()
   }, [currentUser?.id])
 
   useEffect(() => {
+    if (!isSupabaseConfigured()) return
+    const supabase = createClient()
+    const subReceived = addNotificationReceivedListener((notification) => {
+      const data = (notification.request.content.data || {}) as NotificationData
+      trackProductEvent(ProductEventNames.pushReceived, {
+        userId: currentUser?.id ?? null,
+        metadata: {
+          type: data.type,
+          opportunity_id: data.opportunityId,
+          route: data.route,
+        },
+        supabase,
+      })
+    })
+    return () => subReceived.remove()
+  }, [currentUser?.id])
+
+  useEffect(() => {
     const sub = addNotificationResponseReceivedListener((resp) => {
       const data = (resp.notification.request.content.data || {}) as NotificationData
       const target = resolveTarget(data)
+      if (isSupabaseConfigured()) {
+        const supabase = createClient()
+        trackProductEvent(ProductEventNames.pushOpened, {
+          userId: currentUser?.id ?? null,
+          metadata: {
+            target,
+            type: data.type,
+            opportunity_id: data.opportunityId,
+            route: data.route,
+          },
+          supabase,
+        })
+      }
       if (target) router.push(target)
     })
     return () => {
       sub.remove()
     }
-  }, [])
+  }, [currentUser?.id])
 
   return null
 }

@@ -1,5 +1,8 @@
+import '../instrumentation';
+
 import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
+import * as Sentry from '@sentry/react-native';
 
 import { AppProvider } from '../lib/app-provider';
 import { PushBootstrap } from '../lib/push/bootstrap';
@@ -7,13 +10,15 @@ import { TelemetryBootstrap } from '../lib/telemetry/bootstrap';
 import { ThemeProvider, useThemePreference } from '../lib/theme-context';
 import { AppQueryProvider } from '../src/app/providers/query-provider';
 
-export default function RootLayout() {
+function RootLayout() {
   return (
     <ThemeProvider>
       <RootLayoutWithTheme />
     </ThemeProvider>
   );
 }
+
+export default Sentry.wrap(RootLayout);
 
 function RootLayoutWithTheme() {
   const { resolved, tokens } = useThemePreference();
