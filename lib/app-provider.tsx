@@ -83,12 +83,18 @@ function extractTokensFromRedirect(url: string): {
   accessToken: string | null
   refreshToken: string | null
 } {
-  const hashIndex = url.indexOf('#')
-  if (hashIndex < 0) {
+  const hashIdx = url.indexOf('#')
+  const queryIdx = url.indexOf('?')
+  let payload = ''
+  if (hashIdx >= 0) {
+    payload = url.slice(hashIdx + 1)
+  } else if (queryIdx >= 0) {
+    payload = url.slice(queryIdx + 1).split('#')[0] ?? ''
+  }
+  if (!payload) {
     return { accessToken: null, refreshToken: null }
   }
-  const hash = url.slice(hashIndex + 1)
-  const params = new URLSearchParams(hash)
+  const params = new URLSearchParams(payload)
   return {
     accessToken: params.get('access_token'),
     refreshToken: params.get('refresh_token'),
@@ -740,9 +746,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
             })
           }
         }
-        const redirectToNative = nativeAuthCallbackUrl()
-        const redirectToExpo = Linking.createURL('/auth/callback')
-        const redirectTo = redirectToNative
+        // Debe ser exactamente la misma cadena que Supabase usará al redirigir y que
+        // openAuthSessionAsync escucha; Linking.createURL('/auth/callback') en APK puede
+        // diferir (p. ej. /--/) y entonces el navegador nunca devuelve los tokens.
+        const redirectTo = nativeAuthCallbackUrl()
         const { data, error } = await supabase.auth.signInWithOAuth({
           provider: 'google',
           options: {
@@ -756,11 +763,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
           return fail('No se pudo iniciar Google OAuth.')
         }
 
-        const authResult = await WebBrowser.openAuthSessionAsync(data.url, redirectToExpo)
+        const authResult = await WebBrowser.openAuthSessionAsync(data.url, redirectTo)
         if (authResult.type !== 'success' || !authResult.url) {
           if (authResult.type === 'cancel') {
             return fail(
-              `Inicio con Google cancelado o callback no recibido. Verifica en Supabase Auth > URL Configuration que existan \`${redirectToNative}\` y la URL de Expo (exp://.../--/auth/callback) en Additional Redirect URLs.`,
+              `Inicio con Google cancelado o callback no recibido. Verifica en Supabase Auth > URL Configuration que existan \`${redirectTo}\` y la URL de Expo (exp://.../--/auth/callback) en Additional Redirect URLs.`,
               { oauth_step: 'cancel_or_no_callback' }
             )
           }
@@ -769,7 +776,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
         if (isWebCallbackUrl(authResult.url)) {
           return fail(
-            `Google OAuth volvió al callback web (sportmatch.cl) en vez de la app. Ajusta Redirect URLs permitidas en Supabase para mobile (\`${redirectToNative}\` y exp://.../--/auth/callback).`,
+            `Google OAuth volvió al callback web (sportmatch.cl) en vez de la app. Ajusta Redirect URLs permitidas en Supabase para mobile (\`${redirectTo}\` y exp://.../--/auth/callback).`,
             { oauth_step: 'web_callback' }
           )
         }
