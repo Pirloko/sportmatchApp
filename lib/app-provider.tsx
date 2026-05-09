@@ -101,6 +101,19 @@ function extractTokensFromRedirect(url: string): {
   }
 }
 
+/** OAuth PKCE: redirect trae ?code=… en el deep link (sin tokens en el hash). */
+function extractAuthCodeFromRedirect(url: string): string | null {
+  try {
+    const u = new URL(url)
+    const code = u.searchParams.get('code')
+    if (code) return code
+  } catch {
+    /* sportmatch:// puede fallar en algunos runtimes */
+  }
+  const m = url.match(/[?&#]code=([^&#]+)/)
+  return m ? decodeURIComponent(m[1]) : null
+}
+
 function isWebCallbackUrl(url: string): boolean {
   try {
     const u = new URL(url)
@@ -782,17 +795,25 @@ export function AppProvider({ children }: { children: ReactNode }) {
         }
 
         const { accessToken, refreshToken } = extractTokensFromRedirect(authResult.url)
-        if (!accessToken || !refreshToken) {
-          return fail('No se recibieron tokens de autenticación de Google.', {
-            oauth_step: 'missing_tokens',
+        if (accessToken && refreshToken) {
+          const { error: sessionError } = await supabase.auth.setSession({
+            access_token: accessToken,
+            refresh_token: refreshToken,
           })
+          if (sessionError) return fail(formatAuthError(sessionError))
+        } else {
+          const code = extractAuthCodeFromRedirect(authResult.url)
+          if (!code) {
+            return fail(
+              'No se recibieron credenciales del login con Google (ni tokens ni código). Reinstala la app o revisa la configuración OAuth.',
+              { oauth_step: 'missing_tokens_and_code' }
+            )
+          }
+          const { error: exchangeError } = await supabase.auth.exchangeCodeForSession(code)
+          if (exchangeError) {
+            return fail(formatAuthError(exchangeError), { oauth_step: 'exchange_code' })
+          }
         }
-
-        const { error: sessionError } = await supabase.auth.setSession({
-          access_token: accessToken,
-          refresh_token: refreshToken,
-        })
-        if (sessionError) return fail(formatAuthError(sessionError))
 
         const {
           data: { user },

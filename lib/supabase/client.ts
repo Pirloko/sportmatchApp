@@ -79,6 +79,12 @@ export function createClient(): SupabaseClient {
       autoRefreshToken: true,
       detectSessionInUrl: Platform.OS === 'web',
       storageKey,
+      /**
+       * En iOS/Android el flujo implícito con hash en deep link falla a menudo; PKCE + code en query
+       * es el patrón recomendado para OAuth nativo (docs Supabase).
+       * La web sigue en implicit (comportamiento actual en producción).
+       */
+      flowType: Platform.OS === 'web' ? 'implicit' : 'pkce',
     },
   })
 }
