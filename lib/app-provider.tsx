@@ -124,6 +124,107 @@ function isWebCallbackUrl(url: string): boolean {
   }
 }
 
+function isAuthCallbackUrl(url: string): boolean {
+  return (
+    url.includes('auth/callback') ||
+    url.includes('%2Fauth%2Fcallback')
+  )
+}
+
+/**
+ * Android: al volver con sportmatch:// Chrome Custom Tabs a veces devuelve cancel/dismiss
+ * sin `url`, pero el callback llega por Linking. En web seguimos solo con WebBrowser.
+ */
+async function openOAuthAndResolveCallbackUrl(
+  oauthBrowserUrl: string,
+  redirectTo: string
+): Promise<string> {
+  if (Platform.OS === 'web') {
+    const authResult = await WebBrowser.openAuthSessionAsync(
+      oauthBrowserUrl,
+      redirectTo
+    )
+    if (authResult.type === 'success' && authResult.url) {
+      return authResult.url
+    }
+    throw new Error(
+      authResult.type === 'cancel'
+        ? 'Inicio con Google cancelado.'
+        : 'No se completó el inicio de sesión con Google.'
+    )
+  }
+
+  return await new Promise((resolve, reject) => {
+    let settled = false
+    let dismissGraceTimer: ReturnType<typeof setTimeout> | undefined
+    let timeoutId: ReturnType<typeof setTimeout>
+
+    const cleanup = () => {
+      subscription.remove()
+      clearTimeout(timeoutId)
+      if (dismissGraceTimer) clearTimeout(dismissGraceTimer)
+    }
+
+    const finish = (url: string) => {
+      if (settled || !isAuthCallbackUrl(url)) return
+      settled = true
+      cleanup()
+      resolve(url)
+    }
+
+    const subscription = Linking.addEventListener('url', ({ url }) => {
+      finish(url)
+    })
+
+    timeoutId = setTimeout(() => {
+      if (!settled) {
+        settled = true
+        cleanup()
+        reject(new Error('Tiempo agotado al iniciar sesión con Google.'))
+      }
+    }, 120000)
+
+    void Linking.getInitialURL().then((initial) => {
+      if (initial) finish(initial)
+    })
+
+    void WebBrowser.openAuthSessionAsync(oauthBrowserUrl, redirectTo)
+      .then((authResult) => {
+        if (settled) return
+        if (authResult.type === 'success' && authResult.url) {
+          finish(authResult.url)
+          return
+        }
+        // Dar tiempo a que Linking entregue sportmatch://auth/callback?code=…
+        dismissGraceTimer = setTimeout(() => {
+          if (!settled) {
+            settled = true
+            cleanup()
+            reject(
+              new Error(
+                'No se recibió la respuesta del login en la app. Si cancelaste el navegador, inténtalo de nuevo.'
+              )
+            )
+          }
+        }, 10000)
+      })
+      .catch(() => {
+        if (settled) return
+        dismissGraceTimer = setTimeout(() => {
+          if (!settled) {
+            settled = true
+            cleanup()
+            reject(
+              new Error(
+                'No se recibió la respuesta del login en la app. Inténtalo de nuevo.'
+              )
+            )
+          }
+        }, 10000)
+      })
+  })
+}
+
 function isTeamLimitReached(err: unknown): boolean {
   if (!err || typeof err !== 'object') return false
   const e = err as { message?: unknown }
@@ -782,25 +883,24 @@ export function AppProvider({ children }: { children: ReactNode }) {
           return fail('No se pudo iniciar Google OAuth.')
         }
 
-        const authResult = await WebBrowser.openAuthSessionAsync(data.url, redirectTo)
-        if (authResult.type !== 'success' || !authResult.url) {
-          if (authResult.type === 'cancel') {
-            return fail(
-              `Inicio con Google cancelado o callback no recibido. Verifica en Supabase Auth > URL Configuration que existan \`${redirectTo}\` y la URL de Expo (exp://.../--/auth/callback) en Additional Redirect URLs.`,
-              { oauth_step: 'cancel_or_no_callback' }
-            )
-          }
-          return fail('Inicio con Google cancelado.', { oauth_step: 'not_success' })
+        let authCallbackUrl: string
+        try {
+          authCallbackUrl = await openOAuthAndResolveCallbackUrl(data.url, redirectTo)
+        } catch (oauthErr) {
+          const msg =
+            oauthErr instanceof Error ? oauthErr.message : 'Error en login con Google.'
+          return fail(msg, { oauth_step: 'browser_or_linking' })
         }
 
-        if (isWebCallbackUrl(authResult.url)) {
+        if (isWebCallbackUrl(authCallbackUrl)) {
           return fail(
             `Google OAuth volvió al callback web (sportmatch.cl) en vez de la app. Ajusta Redirect URLs permitidas en Supabase para mobile (\`${redirectTo}\` y exp://.../--/auth/callback).`,
             { oauth_step: 'web_callback' }
           )
         }
 
-        const { accessToken, refreshToken } = extractTokensFromRedirect(authResult.url)
+        const { accessToken, refreshToken } =
+          extractTokensFromRedirect(authCallbackUrl)
         if (accessToken && refreshToken) {
           const { error: sessionError } = await supabase.auth.setSession({
             access_token: accessToken,
@@ -808,7 +908,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
           })
           if (sessionError) return fail(formatAuthError(sessionError))
         } else {
-          const code = extractAuthCodeFromRedirect(authResult.url)
+          const code = extractAuthCodeFromRedirect(authCallbackUrl)
           if (!code) {
             return fail(
               'No se recibieron credenciales del login con Google (ni tokens ni código). Reinstala la app o revisa la configuración OAuth.',
