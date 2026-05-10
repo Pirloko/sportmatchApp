@@ -17,6 +17,7 @@ import {
   useState,
   type ReactNode,
 } from 'react'
+import { Platform } from 'react-native'
 import type {
   Gender,
   Level,
@@ -767,7 +768,12 @@ export function AppProvider({ children }: { children: ReactNode }) {
           provider: 'google',
           options: {
             redirectTo,
-            skipBrowserRedirect: true,
+            /**
+             * En nativo, skipBrowserRedirect:true añade skip_http_redirect a la URL de
+             * authorize; GoTrue puede responder de forma que Chrome Custom Tabs muestra
+             * pantalla en blanco. En web seguimos en true para no hacer window.location.
+             */
+            skipBrowserRedirect: Platform.OS === 'web',
             queryParams: isSignUp ? { prompt: 'consent' } : undefined,
           },
         })
