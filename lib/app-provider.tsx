@@ -35,7 +35,11 @@ import type {
   User,
   VenueOnboardingData,
 } from './types'
-import { nativeAuthCallbackUrl } from './app-linking'
+import { completeOAuthFromRedirectUrl } from './complete-oauth-redirect'
+import {
+  getOAuthRedirectUri,
+  oauthRedirectHasCredentials,
+} from './oauth-redirect'
 import {
   DEFAULT_AVATAR,
   mapMatchOpportunityFromDb,
@@ -80,41 +84,6 @@ import {
 
 WebBrowser.maybeCompleteAuthSession()
 
-function extractTokensFromRedirect(url: string): {
-  accessToken: string | null
-  refreshToken: string | null
-} {
-  const hashIdx = url.indexOf('#')
-  const queryIdx = url.indexOf('?')
-  let payload = ''
-  if (hashIdx >= 0) {
-    payload = url.slice(hashIdx + 1)
-  } else if (queryIdx >= 0) {
-    payload = url.slice(queryIdx + 1).split('#')[0] ?? ''
-  }
-  if (!payload) {
-    return { accessToken: null, refreshToken: null }
-  }
-  const params = new URLSearchParams(payload)
-  return {
-    accessToken: params.get('access_token'),
-    refreshToken: params.get('refresh_token'),
-  }
-}
-
-/** OAuth PKCE: redirect trae ?code=… en el deep link (sin tokens en el hash). */
-function extractAuthCodeFromRedirect(url: string): string | null {
-  try {
-    const u = new URL(url)
-    const code = u.searchParams.get('code')
-    if (code) return code
-  } catch {
-    /* sportmatch:// puede fallar en algunos runtimes */
-  }
-  const m = url.match(/[?&#]code=([^&#]+)/)
-  return m ? decodeURIComponent(m[1]) : null
-}
-
 function isWebCallbackUrl(url: string): boolean {
   try {
     const u = new URL(url)
@@ -124,16 +93,11 @@ function isWebCallbackUrl(url: string): boolean {
   }
 }
 
-function isAuthCallbackUrl(url: string): boolean {
-  return (
-    url.includes('auth/callback') ||
-    url.includes('%2Fauth%2Fcallback')
-  )
-}
-
 /**
  * Android: al volver con sportmatch:// Chrome Custom Tabs a veces devuelve cancel/dismiss
  * sin `url`, pero el callback llega por Linking. En web seguimos solo con WebBrowser.
+ * No usar getInitialURL(): puede resolver sportmatch://auth/callback sin ?code= y cerrar
+ * el flujo antes de abrir la pantalla de Google.
  */
 async function openOAuthAndResolveCallbackUrl(
   oauthBrowserUrl: string,
@@ -154,11 +118,16 @@ async function openOAuthAndResolveCallbackUrl(
     )
   }
 
+  try {
+    await WebBrowser.warmUpAsync()
+  } catch {
+    /* opcional en algunos dispositivos */
+  }
+
   return await new Promise((resolve, reject) => {
     let settled = false
     let dismissGraceTimer: ReturnType<typeof setTimeout> | undefined
     let timeoutId: ReturnType<typeof setTimeout>
-
     const cleanup = () => {
       subscription.remove()
       clearTimeout(timeoutId)
@@ -166,7 +135,7 @@ async function openOAuthAndResolveCallbackUrl(
     }
 
     const finish = (url: string) => {
-      if (settled || !isAuthCallbackUrl(url)) return
+      if (settled || !oauthRedirectHasCredentials(url)) return
       settled = true
       cleanup()
       resolve(url)
@@ -183,10 +152,6 @@ async function openOAuthAndResolveCallbackUrl(
         reject(new Error('Tiempo agotado al iniciar sesión con Google.'))
       }
     }, 120000)
-
-    void Linking.getInitialURL().then((initial) => {
-      if (initial) finish(initial)
-    })
 
     void WebBrowser.openAuthSessionAsync(oauthBrowserUrl, redirectTo)
       .then((authResult) => {
@@ -861,10 +826,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
             })
           }
         }
-        // Debe ser exactamente la misma cadena que Supabase usará al redirigir y que
-        // openAuthSessionAsync escucha; Linking.createURL('/auth/callback') en APK puede
-        // diferir (p. ej. /--/) y entonces el navegador nunca devuelve los tokens.
-        const redirectTo = nativeAuthCallbackUrl()
+        const redirectTo = getOAuthRedirectUri()
         const { data, error } = await supabase.auth.signInWithOAuth({
           provider: 'google',
           options: {
@@ -899,26 +861,12 @@ export function AppProvider({ children }: { children: ReactNode }) {
           )
         }
 
-        const { accessToken, refreshToken } =
-          extractTokensFromRedirect(authCallbackUrl)
-        if (accessToken && refreshToken) {
-          const { error: sessionError } = await supabase.auth.setSession({
-            access_token: accessToken,
-            refresh_token: refreshToken,
-          })
-          if (sessionError) return fail(formatAuthError(sessionError))
-        } else {
-          const code = extractAuthCodeFromRedirect(authCallbackUrl)
-          if (!code) {
-            return fail(
-              'No se recibieron credenciales del login con Google (ni tokens ni código). Reinstala la app o revisa la configuración OAuth.',
-              { oauth_step: 'missing_tokens_and_code' }
-            )
-          }
-          const { error: exchangeError } = await supabase.auth.exchangeCodeForSession(code)
-          if (exchangeError) {
-            return fail(formatAuthError(exchangeError), { oauth_step: 'exchange_code' })
-          }
+        const oauthDone = await completeOAuthFromRedirectUrl(
+          supabase,
+          authCallbackUrl
+        )
+        if (!oauthDone.ok) {
+          return fail(oauthDone.error, { oauth_step: 'exchange_code' })
         }
 
         const {
