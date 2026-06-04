@@ -1,4 +1,8 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
+import {
+  joinRivalMatchLineupSlot,
+  moveRivalMatchLineupSlot,
+} from './rival-lineup-actions'
 import type {
   MatchOpportunity,
   TeamPickRole,
@@ -33,12 +37,16 @@ export async function joinMatchOpportunityAction(
     teamPickTeam?: TeamPickTeam
     teamPickRole?: TeamPickRole
     teamPickJoinCode?: string
+    /** Partido rival: bando A (local) o B (visita) + cupo visual. */
+    rivalPickTeam?: TeamPickTeam
+    rivalLineupSlot?: string
+    rivalEncounterRole?: TeamPickRole
   }
 ): Promise<JoinMatchResult> {
-  if (opp.creatorId === currentUser.id) {
+  if (opp.type !== 'rival' && opp.creatorId === currentUser.id) {
     return { ok: false, kind: 'info', message: 'Eres el organizador de este partido.' }
   }
-  if (participatingOpportunityIds.includes(opp.id)) {
+  if (opp.type !== 'rival' && participatingOpportunityIds.includes(opp.id)) {
     return { ok: false, kind: 'info', message: 'Ya estás en este partido.' }
   }
 
@@ -159,7 +167,7 @@ export async function joinMatchOpportunityAction(
       return {
         ok: false,
         error:
-          'Debes elegir equipo (A/B) y rol para unirte a este team pick.',
+          'Debes elegir equipo (A/B) y rol para unirte a esta selección de equipos.',
       }
     }
     if (opp.type === 'team_pick_private' && !/^[0-9]{4}$/.test(joinCode)) {
@@ -192,8 +200,34 @@ export async function joinMatchOpportunityAction(
       typeof teamPickJoinData === 'object' &&
       typeof (teamPickJoinData as { error?: string }).error === 'string'
         ? (teamPickJoinData as { error: string }).error
-        : 'No se pudo unir al partido team pick.'
+        : 'No se pudo unir al partido de selección de equipos.'
     return { ok: false, error: rpcError }
+  } else if (opp.type === 'rival') {
+    const lineupSlot = options?.rivalLineupSlot?.trim()
+    const encounterRole = options?.rivalEncounterRole
+    if (!lineupSlot || !encounterRole) {
+      return {
+        ok: false,
+        error: 'Elige un cupo libre de tu equipo en la plantilla.',
+      }
+    }
+
+    const alreadyIn = participatingOpportunityIds.includes(opp.id)
+    if (!alreadyIn && !options?.rivalPickTeam) {
+      return { ok: false, error: 'No se pudo determinar tu equipo en este encuentro.' }
+    }
+    const result = alreadyIn
+      ? await moveRivalMatchLineupSlot(supabase, opp.id, lineupSlot, encounterRole)
+      : await joinRivalMatchLineupSlot(
+          supabase,
+          opp.id,
+          options!.rivalPickTeam!,
+          lineupSlot,
+          encounterRole
+        )
+
+    if (result.ok) return { ok: true }
+    return { ok: false, error: result.error }
   } else {
     if (cap > 0 && (opp.playersJoined ?? 0) >= cap) {
       return { ok: false, error: 'No quedan cupos en este partido.' }
@@ -215,3 +249,4 @@ export async function joinMatchOpportunityAction(
 
   return { ok: true }
 }
+

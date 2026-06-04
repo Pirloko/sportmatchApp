@@ -1,4 +1,5 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
+import { authLog } from '../auth/auth-debug'
 import type { Gender } from '../types'
 import type { MatchOpportunity, User } from '../types'
 import {
@@ -14,6 +15,11 @@ export async function fetchProfileForUser(
   userId: string,
   email: string
 ): Promise<User | null> {
+  authLog('Hydrate', 'fetchProfileForUser SQL', {
+    table: 'profiles',
+    user_id: userId,
+  })
+
   const { data, error } = await supabase
     .from('profiles')
     .select(
@@ -27,7 +33,24 @@ export async function fetchProfileForUser(
     .eq('id', userId)
     .maybeSingle()
 
-  if (error || !data) return null
+  if (error) {
+    authLog('Hydrate', 'fetchProfileForUser error', {
+      message: error.message,
+      code: error.code,
+      details: error.details,
+      hint: error.hint,
+    })
+    return null
+  }
+
+  if (!data) {
+    authLog('Hydrate', 'fetchProfileForUser no row (maybeSingle null)', {
+      user_id: userId,
+    })
+    return null
+  }
+
+  authLog('Hydrate', 'fetchProfileForUser OK', { user_id: userId })
   return profileRowToUser(data as ProfileRow, email)
 }
 
@@ -95,7 +118,14 @@ export async function fetchOtherProfiles(
 ): Promise<User[]> {
   const { data, error } = await supabase
     .from('profiles')
-    .select('*')
+    .select(
+      `
+      *,
+      geo_cities:city_id (
+        region_id
+      )
+    `
+    )
     .eq('gender', gender)
     .eq('account_type', 'player')
     .neq('id', currentUserId)

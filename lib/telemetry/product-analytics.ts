@@ -1,7 +1,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 import * as Sentry from '@sentry/react-native'
 
-import { createClient, isSupabaseConfigured } from '../supabase/client'
+import { getSupabase, isSupabaseConfigured } from '../supabase/client'
 import { trackEvent as trackEventDb } from './client'
 
 /** Nombres canónicos Fase 1 (alineados con mejoras.md). */
@@ -53,7 +53,7 @@ export function trackProductEvent(
 
   if (!isSupabaseConfigured()) return
   try {
-    const supabase = clientOverride ?? createClient()
+    const supabase = clientOverride ?? getSupabase()
     void trackEventDb(supabase, {
       userId: userId ?? null,
       eventName,

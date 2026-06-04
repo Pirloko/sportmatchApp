@@ -1,4 +1,5 @@
 import { useEffect, useRef } from 'react'
+import { Platform } from 'react-native'
 import { router } from 'expo-router'
 // Importar submódulos evita cargar DevicePushTokenAutoRegistration.fx (rompe Expo Go Android SDK 53+).
 import {
@@ -8,7 +9,9 @@ import {
 import { setNotificationHandler } from 'expo-notifications/build/NotificationsHandler'
 
 import { useApp } from '../app-provider'
-import { createClient, isSupabaseConfigured } from '../supabase/client'
+import { useUnreadNotificationsCount } from '../hooks/use-unread-notifications'
+import { getSupabase, isSupabaseConfigured } from '../supabase/client'
+import { resolvePushNotificationRoute } from '../notifications/resolve-route'
 import { registerDevicePushToken } from './register-device'
 import { ProductEventNames, trackProductEvent } from '../telemetry/product-analytics'
 
@@ -16,45 +19,66 @@ type NotificationData = {
   route?: string
   tab?: string
   opportunityId?: string
+  matchId?: string
   type?: string
+  notificationType?: string
+  targetTab?: string
 }
 
 function resolveTarget(data: NotificationData): string | null {
-  if (data.route && typeof data.route === 'string') return data.route
-  if (data.type === 'chat' && data.opportunityId) {
-    return `/partidos/chat/${data.opportunityId}`
-  }
-  if (data.type === 'invitacion' || data.type === 'invitation') {
-    return '/partidos?tab=invitaciones'
-  }
-  if (data.type === 'finalizado' && data.opportunityId) {
-    return `/partidos/${data.opportunityId}`
-  }
-  if (data.tab === 'chats') return '/partidos?tab=chats'
-  return null
+  return resolvePushNotificationRoute(data)
 }
 
 export function PushBootstrap() {
   const { currentUser } = useApp()
   const didRegisterRef = useRef<string | null>(null)
+  const { count: unreadCount } = useUnreadNotificationsCount(currentUser?.id)
 
   useEffect(() => {
     setNotificationHandler({
       handleNotification: async () => ({
         shouldShowBanner: true,
         shouldShowList: true,
-        shouldPlaySound: false,
-        shouldSetBadge: false,
+        shouldPlaySound: true,
+        shouldSetBadge: true,
       }),
     })
   }, [])
+
+  useEffect(() => {
+    if (Platform.OS !== 'android') return
+    void (async () => {
+      const { default: setNotificationChannelAsync } = await import(
+        'expo-notifications/build/setNotificationChannelAsync'
+      )
+      const { AndroidImportance } = await import(
+        'expo-notifications/build/NotificationChannelManager.types'
+      )
+      await setNotificationChannelAsync('default', {
+        name: 'SportMatch',
+        importance: AndroidImportance.MAX,
+        vibrationPattern: [0, 250, 250, 250],
+        lightColor: '#22c55e',
+      })
+    })()
+  }, [])
+
+  useEffect(() => {
+    if (Platform.OS === 'web' || !currentUser) return
+    void (async () => {
+      const { default: setBadgeCountAsync } = await import(
+        'expo-notifications/build/setBadgeCountAsync'
+      )
+      await setBadgeCountAsync(unreadCount)
+    })()
+  }, [currentUser?.id, unreadCount])
 
   useEffect(() => {
     if (!currentUser || !isSupabaseConfigured()) return
     if (didRegisterRef.current === currentUser.id) return
     didRegisterRef.current = currentUser.id
 
-    const supabase = createClient()
+    const supabase = getSupabase()
     void (async () => {
       const res = await registerDevicePushToken(supabase, currentUser.id)
       if (res.ok) {
@@ -74,7 +98,7 @@ export function PushBootstrap() {
 
   useEffect(() => {
     if (!isSupabaseConfigured()) return
-    const supabase = createClient()
+    const supabase = getSupabase()
     const subReceived = addNotificationReceivedListener((notification) => {
       const data = (notification.request.content.data || {}) as NotificationData
       trackProductEvent(ProductEventNames.pushReceived, {
@@ -95,7 +119,7 @@ export function PushBootstrap() {
       const data = (resp.notification.request.content.data || {}) as NotificationData
       const target = resolveTarget(data)
       if (isSupabaseConfigured()) {
-        const supabase = createClient()
+        const supabase = getSupabase()
         trackProductEvent(ProductEventNames.pushOpened, {
           userId: currentUser?.id ?? null,
           metadata: {

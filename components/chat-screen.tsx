@@ -1,13 +1,9 @@
 import { router, useLocalSearchParams } from 'expo-router'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
-  FlashList,
-  type FlashListRef,
-  type ListRenderItemInfo,
-} from '@shopify/flash-list'
-import {
   ActivityIndicator,
   Alert,
+  FlatList,
   Image,
   KeyboardAvoidingView,
   Platform,
@@ -17,6 +13,7 @@ import {
   Text,
   TextInput,
   View,
+  type ListRenderItemInfo,
 } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
 
@@ -32,12 +29,12 @@ import {
 } from '../lib/format-match'
 import { useApp } from '../lib/app-provider'
 import { DEFAULT_AVATAR } from '../lib/supabase/mappers'
-import { useThemePreference } from '../lib/theme-context'
+import { useScreenTheme } from '../lib/theme-ui'
 import {
   ProductEventNames,
   trackProductEvent,
 } from '../lib/telemetry/product-analytics'
-import { createClient, isSupabaseConfigured } from '../lib/supabase/client'
+import { getSupabase, isSupabaseConfigured } from '../lib/supabase/client'
 import {
   CHAT_MESSAGES_PAGE_SIZE,
   fetchChatMessagesPage,
@@ -128,7 +125,8 @@ export function ChatScreen() {
     suspendMatchOpportunity,
     submitMatchRating,
   } = useApp()
-  const { tokens } = useThemePreference()
+  const theme = useScreenTheme()
+  const styles = useMemo(() => createStyles(theme), [theme])
 
   const [messages, setMessages] = useState<UiMessage[]>([])
   const [loading, setLoading] = useState(true)
@@ -145,7 +143,7 @@ export function ChatScreen() {
   const [hasMoreOlder, setHasMoreOlder] = useState(false)
   const [loadingOlder, setLoadingOlder] = useState(false)
   const [isSending, setIsSending] = useState(false)
-  const listRef = useRef<FlashListRef<UiMessage>>(null)
+  const listRef = useRef<FlatList<UiMessage>>(null)
   const messagesRef = useRef<UiMessage[]>([])
   const hasMoreOlderRef = useRef(false)
   const loadingOlderRef = useRef(false)
@@ -182,7 +180,7 @@ export function ChatScreen() {
     setLoadingRating(true)
     try {
       const row = await fetchMyRatingForOpportunity(
-        createClient(),
+        getSupabase(),
         opportunityId,
         currentUser.id
       )
@@ -199,7 +197,7 @@ export function ChatScreen() {
     }
     setLoadingParticipants(true)
     try {
-      const supabase = createClient()
+      const supabase = getSupabase()
       const rows = await fetchParticipantsForOpportunity(
         supabase,
         opportunityId
@@ -232,7 +230,7 @@ export function ChatScreen() {
         setLoading(true)
       }
       try {
-        const supabase = createClient()
+        const supabase = getSupabase()
         const { rows, hasMore } = await fetchChatMessagesPage(
           supabase,
           opportunityId,
@@ -275,7 +273,7 @@ export function ChatScreen() {
         createdAtIso: oldest.createdAt.toISOString(),
         id: oldest.id,
       }
-      const supabase = createClient()
+      const supabase = getSupabase()
       const { rows, hasMore } = await fetchChatMessagesPage(
         supabase,
         opportunityId,
@@ -329,7 +327,7 @@ export function ChatScreen() {
 
   useEffect(() => {
     if (!opportunityId || !isSupabaseConfigured() || !currentUser) return
-    const supabase = createClient()
+    const supabase = getSupabase()
     const channel = supabase
       .channel(`messages:${opportunityId}`)
       .on(
@@ -452,7 +450,7 @@ export function ChatScreen() {
         </View>
       </View>
     ),
-    []
+    [styles]
   )
 
   const handleSend = async () => {
@@ -473,7 +471,7 @@ export function ChatScreen() {
       return
     }
 
-    const supabase = createClient()
+    const supabase = getSupabase()
     const trimmed = newMessage.trim()
     const tempId = `pending:${Date.now().toString(36)}:${Math.random()
       .toString(36)
@@ -553,7 +551,7 @@ export function ChatScreen() {
 
   if (!opportunityId) {
     return (
-      <SafeAreaView style={[styles.safe, { backgroundColor: tokens.bgDark }]} edges={['top']}>
+      <SafeAreaView style={[styles.safe, { backgroundColor: theme.bg }]} edges={['top']}>
         <View style={styles.center}>
           <Text style={styles.muted}>No hay partido seleccionado.</Text>
           <Pressable style={styles.btn} onPress={goBack}>
@@ -566,7 +564,7 @@ export function ChatScreen() {
 
   if (!opportunity) {
     return (
-      <SafeAreaView style={[styles.safe, { backgroundColor: tokens.bgDark }]} edges={['top']}>
+      <SafeAreaView style={[styles.safe, { backgroundColor: theme.bg }]} edges={['top']}>
         <View style={styles.center}>
           <ActivityIndicator size="large" />
           <Text style={styles.muted}>Cargando partido…</Text>
@@ -577,7 +575,7 @@ export function ChatScreen() {
 
   if (!canAccess) {
     return (
-      <SafeAreaView style={[styles.safe, { backgroundColor: tokens.bgDark }]} edges={['top']}>
+      <SafeAreaView style={[styles.safe, { backgroundColor: theme.bg }]} edges={['top']}>
         <View style={styles.center}>
           <Text style={styles.muted}>No tienes acceso a este chat.</Text>
           <Pressable style={styles.btn} onPress={goBack}>
@@ -589,7 +587,7 @@ export function ChatScreen() {
   }
 
   return (
-    <SafeAreaView style={[styles.safe, { backgroundColor: tokens.bgDark }]} edges={['top']}>
+    <SafeAreaView style={[styles.safe, { backgroundColor: theme.bg }]} edges={['top']}>
       <KeyboardAvoidingView
         style={styles.flex}
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
@@ -685,7 +683,7 @@ export function ChatScreen() {
           </ScrollView>
         ) : null}
 
-        <FlashList
+        <FlatList
           ref={listRef}
           data={messages}
           keyExtractor={(item) => item.id}
@@ -697,7 +695,7 @@ export function ChatScreen() {
             hasMoreOlder ? (
               <View style={styles.olderHeader}>
                 {loadingOlder ? (
-                  <ActivityIndicator color="#6b7280" />
+                  <ActivityIndicator color={theme.textMuted} />
                 ) : (
                   <Text style={styles.olderHint}>
                     Desliza arriba para cargar anteriores
@@ -713,14 +711,16 @@ export function ChatScreen() {
               <Text style={styles.loadingText}>Sin mensajes aún.</Text>
             )
           }
-          onStartReached={() => {
-            if (hasMoreOlder && !loadingOlderRef.current) {
-              void loadOlderMessages()
+          onScroll={(e) => {
+            if (e.nativeEvent.contentOffset.y <= 48) {
+              if (hasMoreOlder && !loadingOlderRef.current) {
+                void loadOlderMessages()
+              }
             }
           }}
-          onStartReachedThreshold={0.25}
+          scrollEventThrottle={200}
           maintainVisibleContentPosition={{
-            startRenderingFromBottom: true,
+            minIndexForVisible: 0,
             autoscrollToTopThreshold: 80,
           }}
         />
@@ -757,7 +757,7 @@ export function ChatScreen() {
               placeholder={
                 chatOpen ? 'Escribe un mensaje…' : 'Chat cerrado — solo lectura'
               }
-              placeholderTextColor="#9ca3af"
+              placeholderTextColor={theme.textMuted}
               value={newMessage}
               onChangeText={setNewMessage}
               editable={chatOpen}
@@ -782,8 +782,9 @@ export function ChatScreen() {
   )
 }
 
-const styles = StyleSheet.create({
-  safe: { flex: 1, backgroundColor: '#fff' },
+function createStyles(theme: ReturnType<typeof useScreenTheme>) {
+  return StyleSheet.create({
+  safe: { flex: 1, backgroundColor: theme.bg },
   flex: { flex: 1 },
   center: {
     flex: 1,
@@ -791,74 +792,74 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     padding: 24,
   },
-  muted: { fontSize: 15, color: '#6b7280', textAlign: 'center' },
+  muted: { fontSize: 15, color: theme.textMuted, textAlign: 'center' },
   btn: {
     marginTop: 16,
-    backgroundColor: '#2563eb',
+    backgroundColor: theme.primary,
     paddingHorizontal: 24,
     paddingVertical: 12,
     borderRadius: 12,
   },
-  btnText: { color: '#fff', fontWeight: '700' },
+  btnText: { color: theme.primaryBtnText, fontWeight: '700' },
   header: {
     flexDirection: 'row',
     alignItems: 'center',
     paddingHorizontal: 12,
     paddingVertical: 10,
     borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: '#e5e7eb',
+    borderBottomColor: theme.border,
     gap: 8,
   },
-  back: { fontSize: 16, color: '#2563eb', fontWeight: '600' },
+  back: { fontSize: 16, color: theme.link, fontWeight: '600' },
   headerMid: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: 10 },
   headerAvatar: {
     width: 40,
     height: 40,
     borderRadius: 20,
     borderWidth: 2,
-    borderColor: '#2563eb',
+    borderColor: theme.primary,
   },
   headerText: { flex: 1, minWidth: 0 },
-  headerTitle: { fontSize: 16, fontWeight: '700', color: '#111' },
-  headerSub: { fontSize: 12, color: '#6b7280', marginTop: 2 },
+  headerTitle: { fontSize: 16, fontWeight: '700', color: theme.text },
+  headerSub: { fontSize: 12, color: theme.textMuted, marginTop: 2 },
   infoBtn: { fontSize: 22 },
   detailLink: {
     paddingVertical: 8,
     paddingHorizontal: 16,
     borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: '#e5e7eb',
+    borderBottomColor: theme.border,
   },
-  detailLinkText: { fontSize: 14, fontWeight: '600', color: '#2563eb' },
+  detailLinkText: { fontSize: 14, fontWeight: '600', color: theme.link },
   infoPanel: {
     maxHeight: 220,
     paddingHorizontal: 16,
     paddingVertical: 12,
-    backgroundColor: '#f9fafb',
+    backgroundColor: theme.bg,
     borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: '#e5e7eb',
+    borderBottomColor: theme.border,
   },
-  infoLine: { fontSize: 14, color: '#111', marginBottom: 6 },
-  infoMeta: { fontSize: 13, color: '#6b7280', marginBottom: 8 },
+  infoLine: { fontSize: 14, color: theme.text, marginBottom: 6 },
+  infoMeta: { fontSize: 13, color: theme.textMuted, marginBottom: 8 },
   warnBox: {
     borderRadius: 10,
     borderWidth: 1,
-    borderColor: 'rgba(220, 38, 38, 0.35)',
-    backgroundColor: 'rgba(220, 38, 38, 0.08)',
+    borderColor: theme.isDark ? 'rgba(248, 113, 113, 0.45)' : 'rgba(220, 38, 38, 0.35)',
+    backgroundColor: theme.isDark ? 'rgba(220, 38, 38, 0.16)' : 'rgba(220, 38, 38, 0.08)',
     padding: 10,
     marginBottom: 10,
   },
   warnTitle: {
     fontSize: 11,
     fontWeight: '700',
-    color: '#b91c1c',
+    color: theme.danger,
     textTransform: 'uppercase',
     marginBottom: 4,
   },
-  warnBody: { fontSize: 14, color: '#7f1d1d' },
+  warnBody: { fontSize: 14, color: theme.text },
   partTitle: {
     fontSize: 11,
     fontWeight: '700',
-    color: '#6b7280',
+    color: theme.textMuted,
     textTransform: 'uppercase',
     marginTop: 8,
     marginBottom: 8,
@@ -873,10 +874,10 @@ const styles = StyleSheet.create({
     width: 28,
     height: 28,
     borderRadius: 14,
-    backgroundColor: '#e5e7eb',
+    backgroundColor: theme.chipBg,
   },
-  partName: { flex: 1, fontSize: 14, color: '#111' },
-  partStatus: { fontSize: 11, color: '#6b7280' },
+  partName: { flex: 1, fontSize: 14, color: theme.text },
+  partStatus: { fontSize: 11, color: theme.textMuted },
   msgScroll: { flex: 1 },
   msgContent: { padding: 16, paddingBottom: 8 },
   olderHeader: {
@@ -884,8 +885,8 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  olderHint: { fontSize: 12, color: '#9ca3af' },
-  loadingText: { textAlign: 'center', color: '#6b7280', paddingVertical: 24 },
+  olderHint: { fontSize: 12, color: theme.textMuted },
+  loadingText: { textAlign: 'center', color: theme.textMuted, paddingVertical: 24 },
   msgRow: {
     width: '100%',
     flexDirection: 'row',
@@ -900,7 +901,7 @@ const styles = StyleSheet.create({
     width: 32,
     height: 32,
     borderRadius: 16,
-    backgroundColor: '#e5e7eb',
+    backgroundColor: theme.chipBg,
   },
   bubble: {
     maxWidth: '80%',
@@ -909,24 +910,24 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
   },
   bubbleMe: {
-    backgroundColor: '#2563eb',
+    backgroundColor: theme.primary,
     borderBottomRightRadius: 4,
   },
   bubbleThem: {
-    backgroundColor: '#f3f4f6',
+    backgroundColor: theme.chipBg,
     borderBottomLeftRadius: 4,
   },
-  senderName: { fontSize: 10, color: '#6b7280', marginBottom: 4 },
+  senderName: { fontSize: 10, color: theme.textMuted, marginBottom: 4 },
   msgText: { fontSize: 15, lineHeight: 20 },
-  msgTextMe: { color: '#fff' },
-  msgTextThem: { color: '#111' },
+  msgTextMe: { color: theme.primaryBtnText },
+  msgTextThem: { color: theme.text },
   msgTime: { fontSize: 10, marginTop: 4 },
   msgTimeMe: { color: 'rgba(255,255,255,0.75)' },
-  msgTimeThem: { color: '#9ca3af' },
+  msgTimeThem: { color: theme.textMuted },
   inputBar: {
     borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: '#e5e7eb',
-    backgroundColor: '#fff',
+    borderTopColor: theme.border,
+    backgroundColor: theme.card,
     paddingBottom: Platform.OS === 'ios' ? 8 : 12,
   },
   closedBanner: {
@@ -934,12 +935,12 @@ const styles = StyleSheet.create({
     marginTop: 10,
     padding: 10,
     borderRadius: 12,
-    backgroundColor: '#f3f4f6',
+    backgroundColor: theme.chipBg,
   },
-  closedText: { fontSize: 12, color: '#4b5563', lineHeight: 18 },
+  closedText: { fontSize: 12, color: theme.textMuted, lineHeight: 18 },
   hintClose: {
     fontSize: 11,
-    color: '#6b7280',
+    color: theme.textMuted,
     textAlign: 'center',
     marginTop: 8,
     paddingHorizontal: 16,
@@ -956,20 +957,21 @@ const styles = StyleSheet.create({
     minHeight: 44,
     maxHeight: 120,
     borderWidth: 1,
-    borderColor: '#e5e7eb',
+    borderColor: theme.border,
     borderRadius: 22,
     paddingHorizontal: 16,
     paddingVertical: 10,
     fontSize: 16,
-    color: '#111',
-    backgroundColor: '#f9fafb',
+    color: theme.text,
+    backgroundColor: theme.bg,
   },
   sendBtn: {
-    backgroundColor: '#2563eb',
+    backgroundColor: theme.primary,
     paddingHorizontal: 18,
     paddingVertical: 12,
     borderRadius: 22,
   },
   sendBtnOff: { opacity: 0.45 },
-  sendBtnText: { color: '#fff', fontWeight: '700', fontSize: 15 },
+  sendBtnText: { color: theme.primaryBtnText, fontWeight: '700', fontSize: 15 },
 })
+}

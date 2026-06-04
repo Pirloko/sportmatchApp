@@ -13,7 +13,7 @@ import { SafeAreaView } from 'react-native-safe-area-context'
 import { router } from 'expo-router'
 
 import { useApp } from '../lib/app-provider'
-import { useThemePreference } from '../lib/theme-context'
+import { useScreenTheme } from '../lib/theme-ui'
 import {
   createVenueUserViaBackend,
   isAdminCreateVenueConfigured,
@@ -23,7 +23,7 @@ import {
   type AdminMetrics,
   type RangeKey,
 } from '../lib/supabase/admin-queries'
-import { createClient } from '../lib/supabase/client'
+import { getSupabase } from '../lib/supabase/client'
 import type { Gender, Level, MatchType } from '../lib/types'
 
 const RANGE_OPTIONS: Array<{ id: RangeKey; label: string }> = [
@@ -37,7 +37,8 @@ const RANGE_OPTIONS: Array<{ id: RangeKey; label: string }> = [
 
 export function AdminDashboardScreen() {
   const { currentUser, logout } = useApp()
-  const { tokens } = useThemePreference()
+  const theme = useScreenTheme()
+  const styles = useMemo(() => createStyles(theme), [theme])
   const [loading, setLoading] = useState(true)
   const [metrics, setMetrics] = useState<AdminMetrics | null>(null)
   const [range, setRange] = useState<RangeKey>('month')
@@ -67,7 +68,7 @@ export function AdminDashboardScreen() {
   const reloadMetrics = useCallback(async () => {
     setLoading(true)
     try {
-      const supabase = createClient()
+      const supabase = getSupabase()
       const m = await fetchAdminMetrics(supabase, range)
       setMetrics(m)
     } catch (e) {
@@ -101,7 +102,7 @@ export function AdminDashboardScreen() {
       Alert.alert('Completa email, clave y nombre del centro.')
       return
     }
-    const supabase = createClient()
+    const supabase = getSupabase()
     const { data: { session } } = await supabase.auth.getSession()
     if (!session?.access_token) {
       Alert.alert('Sesión', 'No hay token de sesión.')
@@ -161,7 +162,7 @@ export function AdminDashboardScreen() {
         : null
     setCreatingMatch(true)
     try {
-      const supabase = createClient()
+      const supabase = getSupabase()
       const title =
         adminMatchForm.title.trim() ||
         `Partido SportMatch ${adminMatchForm.city.trim()}`
@@ -205,7 +206,7 @@ export function AdminDashboardScreen() {
 
   if (!currentUser || currentUser.accountType !== 'admin') {
     return (
-      <SafeAreaView style={[styles.safe, { backgroundColor: tokens.bgDark }]} edges={['top']}>
+      <SafeAreaView style={[styles.safe, { backgroundColor: theme.bg }]} edges={['top']}>
         <View style={styles.restricted}>
           <Text style={styles.restrictedTitle}>Acceso restringido</Text>
           <Text style={styles.muted}>
@@ -217,7 +218,7 @@ export function AdminDashboardScreen() {
   }
 
   return (
-    <SafeAreaView style={[styles.safe, { backgroundColor: tokens.bgDark }]} edges={['top']}>
+    <SafeAreaView style={[styles.safe, { backgroundColor: theme.bg }]} edges={['top']}>
       <View style={styles.header}>
         <View>
           <Text style={styles.h1}>Panel Admin</Text>
@@ -398,7 +399,7 @@ export function AdminDashboardScreen() {
               onPress={() => setAdminMatchForm((f) => ({ ...f, type: 'open' }))}
             />
             <PickerChip
-              label="Team pick"
+              label="Selección de equipos"
               active={
                 adminMatchForm.type === 'team_pick_public' ||
                 adminMatchForm.type === 'team_pick_private'
@@ -457,7 +458,7 @@ export function AdminDashboardScreen() {
             onPress={() => void handleCreateAdminMatch()}
           >
             {creatingMatch ? (
-              <ActivityIndicator color="#fff" />
+              <ActivityIndicator color={theme.primaryBtnText} />
             ) : (
               <Text style={styles.btnPrimaryText}>Crear partido admin</Text>
             )}
@@ -522,7 +523,7 @@ export function AdminDashboardScreen() {
             onPress={() => void handleCreateVenueUser()}
           >
             {creating ? (
-              <ActivityIndicator color="#fff" />
+              <ActivityIndicator color={theme.primaryBtnText} />
             ) : (
               <Text style={styles.btnPrimaryText}>Crear usuario centro</Text>
             )}
@@ -531,6 +532,12 @@ export function AdminDashboardScreen() {
       </ScrollView>
     </SafeAreaView>
   )
+}
+
+function useThemedStyles() {
+  const theme = useScreenTheme()
+  const styles = useMemo(() => createStyles(theme), [theme])
+  return { theme, styles }
 }
 
 function Cell({
@@ -542,6 +549,7 @@ function Cell({
   head?: boolean
   narrow?: boolean
 }) {
+  const { styles } = useThemedStyles()
   return (
     <Text
       style={[styles.td, head && styles.th, narrow && styles.tdNarrow]}
@@ -553,6 +561,7 @@ function Cell({
 }
 
 function TypePill({ label, value }: { label: string; value: number }) {
+  const { styles } = useThemedStyles()
   return (
     <View style={styles.typePill}>
       <Text style={styles.muted}>{label}</Text>
@@ -590,6 +599,7 @@ function confirmationLabel(
 }
 
 function Stat({ label, value }: { label: string; value: string | number }) {
+  const { styles } = useThemedStyles()
   return (
     <View style={styles.stat}>
       <Text style={styles.statLabel}>{label}</Text>
@@ -613,6 +623,7 @@ function Field({
   autoCapitalize?: 'none' | 'sentences'
   keyboardType?: 'default' | 'email-address' | 'phone-pad'
 }) {
+  const { styles, theme } = useThemedStyles()
   return (
     <View style={styles.field}>
       <Text style={styles.label}>{label}</Text>
@@ -623,6 +634,7 @@ function Field({
         secureTextEntry={secureTextEntry}
         autoCapitalize={autoCapitalize}
         keyboardType={keyboardType}
+        placeholderTextColor={theme.textMuted}
       />
     </View>
   )
@@ -637,6 +649,7 @@ function PickerChip({
   active: boolean
   onPress: () => void
 }) {
+  const { styles } = useThemedStyles()
   return (
     <Pressable style={[styles.pickChip, active && styles.pickChipOn]} onPress={onPress}>
       <Text style={[styles.pickChipText, active && styles.pickChipTextOn]}>{label}</Text>
@@ -644,8 +657,9 @@ function PickerChip({
   )
 }
 
-const styles = StyleSheet.create({
-  safe: { flex: 1, backgroundColor: '#fff' },
+function createStyles(theme: ReturnType<typeof useScreenTheme>) {
+  return StyleSheet.create({
+  safe: { flex: 1, backgroundColor: theme.bg },
   header: {
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -653,20 +667,20 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingVertical: 12,
     borderBottomWidth: StyleSheet.hairlineWidth,
-    borderColor: '#e5e7eb',
+    borderColor: theme.border,
   },
-  h1: { fontSize: 22, fontWeight: '800', color: '#111' },
-  sub: { fontSize: 13, color: '#6b7280', marginTop: 4, maxWidth: 280 },
+  h1: { fontSize: 22, fontWeight: '800', color: theme.text },
+  sub: { fontSize: 13, color: theme.textMuted, marginTop: 4, maxWidth: 280 },
   btnGhost: { padding: 8 },
-  btnGhostText: { fontSize: 15, fontWeight: '600', color: '#2563eb' },
+  btnGhostText: { fontSize: 15, fontWeight: '600', color: theme.link },
   scroll: { flex: 1 },
   content: { padding: 16, paddingBottom: 40, gap: 16 },
   card: {
     borderWidth: 1,
-    borderColor: '#e5e7eb',
+    borderColor: theme.border,
     borderRadius: 14,
     padding: 14,
-    backgroundColor: '#fafafa',
+    backgroundColor: theme.chipBg,
     gap: 12,
   },
   rangeRow: { gap: 10 },
@@ -676,38 +690,41 @@ const styles = StyleSheet.create({
     paddingVertical: 8,
     borderRadius: 20,
     borderWidth: 1,
-    borderColor: '#e5e7eb',
-    backgroundColor: '#fff',
+    borderColor: theme.border,
+    backgroundColor: theme.card,
   },
-  chipOn: { borderColor: '#2563eb', backgroundColor: 'rgba(37, 99, 235, 0.12)' },
-  chipText: { fontSize: 12, color: '#6b7280', fontWeight: '600' },
-  chipTextOn: { color: '#1e40af' },
+  chipOn: {
+    borderColor: theme.primary,
+    backgroundColor: theme.isDark ? 'rgba(37, 99, 235, 0.2)' : 'rgba(37, 99, 235, 0.12)',
+  },
+  chipText: { fontSize: 12, color: theme.textMuted, fontWeight: '600' },
+  chipTextOn: { color: theme.primary },
   refreshBtn: { alignSelf: 'flex-end', padding: 8 },
-  refreshText: { color: '#2563eb', fontWeight: '700' },
+  refreshText: { color: theme.link, fontWeight: '700' },
   statsGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
   stat: {
     width: '47%',
     borderWidth: 1,
-    borderColor: '#e5e7eb',
+    borderColor: theme.border,
     borderRadius: 10,
     padding: 10,
-    backgroundColor: '#fff',
+    backgroundColor: theme.card,
   },
-  statLabel: { fontSize: 11, color: '#6b7280' },
-  statValue: { fontSize: 18, fontWeight: '800', color: '#111', marginTop: 2 },
-  muted: { fontSize: 14, color: '#6b7280' },
-  mutedPad: { padding: 12, fontSize: 13, color: '#6b7280' },
-  sectionTitle: { fontSize: 16, fontWeight: '700', color: '#111', marginBottom: 6 },
+  statLabel: { fontSize: 11, color: theme.textMuted },
+  statValue: { fontSize: 18, fontWeight: '800', color: theme.text, marginTop: 2 },
+  muted: { fontSize: 14, color: theme.textMuted },
+  mutedPad: { padding: 12, fontSize: 13, color: theme.textMuted },
+  sectionTitle: { fontSize: 16, fontWeight: '700', color: theme.text, marginBottom: 6 },
   twoCol: { gap: 12 },
   subCard: {
     borderWidth: 1,
-    borderColor: '#e5e7eb',
+    borderColor: theme.border,
     borderRadius: 12,
     padding: 12,
-    backgroundColor: '#f3f4f6',
+    backgroundColor: theme.chipBg,
     gap: 8,
   },
-  listLine: { fontSize: 13, color: '#374151' },
+  listLine: { fontSize: 13, color: theme.text },
   typePill: {
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -716,66 +733,67 @@ const styles = StyleSheet.create({
     paddingHorizontal: 10,
     borderRadius: 10,
     borderWidth: 1,
-    borderColor: '#e5e7eb',
-    backgroundColor: '#fff',
+    borderColor: theme.border,
+    backgroundColor: theme.card,
   },
-  typeVal: { fontSize: 15, fontWeight: '800', color: '#111' },
+  typeVal: { fontSize: 15, fontWeight: '800', color: theme.text },
   table: { minWidth: 860, gap: 0 },
-  trHead: { flexDirection: 'row', backgroundColor: '#e5e7eb', paddingVertical: 6 },
+  trHead: { flexDirection: 'row', backgroundColor: theme.chipBg, paddingVertical: 6 },
   tr: {
     flexDirection: 'row',
     borderTopWidth: StyleSheet.hairlineWidth,
-    borderColor: '#e5e7eb',
+    borderColor: theme.border,
     paddingVertical: 6,
   },
-  td: { width: 108, fontSize: 11, color: '#374151', paddingHorizontal: 4 },
+  td: { width: 108, fontSize: 11, color: theme.text, paddingHorizontal: 4 },
   tdNarrow: { width: 140 },
-  th: { fontWeight: '700', color: '#6b7280' },
+  th: { fontWeight: '700', color: theme.textMuted },
   field: { gap: 4 },
-  label: { fontSize: 14, fontWeight: '600', color: '#374151' },
+  label: { fontSize: 14, fontWeight: '600', color: theme.text },
   input: {
     borderWidth: 1,
-    borderColor: '#e5e7eb',
+    borderColor: theme.border,
     borderRadius: 10,
     padding: 12,
     fontSize: 16,
-    backgroundColor: '#fff',
-    color: '#111',
+    backgroundColor: theme.card,
+    color: theme.text,
   },
   btnPrimary: {
-    backgroundColor: '#2563eb',
+    backgroundColor: theme.primary,
     borderRadius: 12,
     paddingVertical: 14,
     alignItems: 'center',
     marginTop: 8,
   },
-  btnPrimaryText: { color: '#fff', fontSize: 16, fontWeight: '700' },
-  manageLink: { color: '#2563eb', fontWeight: '700', fontSize: 12 },
+  btnPrimaryText: { color: theme.primaryBtnText, fontSize: 16, fontWeight: '700' },
+  manageLink: { color: theme.link, fontWeight: '700', fontSize: 12 },
   rowPickers: { flexDirection: 'row', gap: 8, flexWrap: 'wrap' },
   pickChip: {
     borderWidth: 1,
-    borderColor: '#e5e7eb',
+    borderColor: theme.border,
     borderRadius: 18,
     paddingHorizontal: 10,
     paddingVertical: 7,
-    backgroundColor: '#fff',
+    backgroundColor: theme.card,
   },
   pickChipOn: {
-    borderColor: '#2563eb',
-    backgroundColor: 'rgba(37, 99, 235, 0.1)',
+    borderColor: theme.primary,
+    backgroundColor: theme.isDark ? 'rgba(37, 99, 235, 0.2)' : 'rgba(37, 99, 235, 0.1)',
   },
-  pickChipText: { fontSize: 12, color: '#6b7280', fontWeight: '600' },
-  pickChipTextOn: { color: '#1d4ed8' },
+  pickChipText: { fontSize: 12, color: theme.textMuted, fontWeight: '600' },
+  pickChipTextOn: { color: theme.primary },
   disabled: { opacity: 0.55 },
   restricted: { padding: 24 },
   restrictedTitle: { fontSize: 18, fontWeight: '700', marginBottom: 8 },
   warnBox: {
     fontSize: 13,
-    color: '#92400e',
-    backgroundColor: '#fffbeb',
+    color: theme.isDark ? '#FCD34D' : '#92400e',
+    backgroundColor: theme.isDark ? 'rgba(245, 158, 11, 0.14)' : '#fffbeb',
     padding: 10,
     borderRadius: 10,
     lineHeight: 20,
   },
   mono: { fontFamily: 'monospace', fontSize: 12 },
 })
+}

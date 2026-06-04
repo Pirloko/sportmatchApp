@@ -1,24 +1,110 @@
-import { Redirect, router } from 'expo-router'
-import { useEffect } from 'react'
-import { ActivityIndicator, StyleSheet, View } from 'react-native'
+import * as Linking from 'expo-linking'
+import { Redirect, router, useGlobalSearchParams } from 'expo-router'
+import { useEffect, useRef, useState } from 'react'
+import { ActivityIndicator, StyleSheet, Text, View } from 'react-native'
 
 import { useApp } from '../../lib/app-provider'
+import { authLog } from '../../lib/auth/auth-debug'
+import { recoverOAuthCallbackFromAllSources } from '../../lib/auth/oauth-callback-handler'
 
 /**
- * Tras OAuth, el sistema abre sportmatch://auth/callback?code=….
- * No redirigir al instante a /: el intercambio del código ocurre en loginWithGoogle;
- * aquí esperamos a que exista sesión antes de volver al gate raíz.
+ * Deep link sportmatch://auth/callback?code=…
+ * Canje PKCE + hydrate vía AppProvider.
  */
 export default function AuthCallbackScreen() {
-  const { authLoading, isAuthenticated } = useApp()
+  const params = useGlobalSearchParams<{
+    code?: string | string[]
+    access_token?: string | string[]
+    refresh_token?: string | string[]
+    error?: string | string[]
+    error_description?: string | string[]
+  }>()
+  const linkingUrl = Linking.useURL()
+  const { authLoading, isAuthenticated, currentUser, syncAuthFromSession } =
+    useApp()
+  const [exchangeError, setExchangeError] = useState<string | null>(null)
+  const [exchangeDone, setExchangeDone] = useState(false)
+  const recoveryStartedRef = useRef(false)
+
+  const codeParam =
+    typeof params.code === 'string'
+      ? params.code
+      : Array.isArray(params.code)
+        ? params.code[0]
+        : null
 
   useEffect(() => {
-    if (authLoading || isAuthenticated) return
+    if (recoveryStartedRef.current) return
+    recoveryStartedRef.current = true
+
+    authLog('AuthCallback', 'mounted', {
+      code_param: Boolean(codeParam),
+      linking_url: linkingUrl?.slice(0, 120) ?? null,
+    })
+
+    let cancelled = false
+
+    const finishRecovery = async (
+      res: { ok: boolean; error?: string },
+      hadCredentials: boolean
+    ) => {
+      if (cancelled) return
+      setExchangeDone(true)
+      authLog('AuthCallback', 'recovery finished', {
+        ok: res.ok,
+        error: res.error,
+      })
+      if (!res.ok) {
+        if (hadCredentials) {
+          setExchangeError(
+            res.error ??
+              'No se pudo completar el inicio de sesión desde el enlace. Vuelve a intentar con Google.'
+          )
+        }
+        return
+      }
+      await syncAuthFromSession()
+    }
+
+    void recoverOAuthCallbackFromAllSources(params, linkingUrl).then((res) =>
+      finishRecovery(res, Boolean(codeParam || linkingUrl))
+    )
+
+    const sub = Linking.addEventListener('url', ({ url }) => {
+      authLog('AuthCallback', 'Linking url while on callback', {
+        preview: url.slice(0, 120),
+      })
+      void recoverOAuthCallbackFromAllSources(undefined, url).then((res) =>
+        finishRecovery(res, true)
+      )
+    })
+
+    return () => {
+      cancelled = true
+      sub.remove()
+    }
+  }, [codeParam, linkingUrl, params, syncAuthFromSession])
+
+  useEffect(() => {
+    if (authLoading) return
+    if (isAuthenticated) return
+    if (!exchangeDone) return
     const t = setTimeout(() => {
+      authLog('Navigation', 'AuthCallback timeout → / (sin currentUser)', {
+        exchangeError,
+      })
       router.replace('/')
-    }, 8000)
+    }, 12000)
     return () => clearTimeout(t)
-  }, [authLoading, isAuthenticated])
+  }, [authLoading, isAuthenticated, exchangeDone, exchangeError])
+
+  useEffect(() => {
+    if (isAuthenticated) {
+      authLog('Navigation', 'AuthCallback → Redirect /', {
+        user_id: currentUser?.id,
+      })
+    }
+  }, [isAuthenticated, currentUser])
 
   if (isAuthenticated) {
     return <Redirect href="/" />
@@ -27,6 +113,11 @@ export default function AuthCallbackScreen() {
   return (
     <View style={styles.center}>
       <ActivityIndicator size="large" color="#0F4539" />
+      {exchangeError ? (
+        <Text style={styles.error}>{exchangeError}</Text>
+      ) : (
+        <Text style={styles.hint}>Completando inicio de sesión…</Text>
+      )}
     </View>
   )
 }
@@ -37,5 +128,18 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     backgroundColor: '#fff',
+    padding: 24,
+  },
+  hint: {
+    marginTop: 16,
+    fontSize: 15,
+    color: '#374151',
+    textAlign: 'center',
+  },
+  error: {
+    marginTop: 16,
+    fontSize: 14,
+    color: '#b91c1c',
+    textAlign: 'center',
   },
 })

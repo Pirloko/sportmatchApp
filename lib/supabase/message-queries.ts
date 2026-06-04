@@ -217,6 +217,24 @@ export type OpportunityParticipantRow = {
   photo: string
   status: 'creator' | 'confirmed' | 'pending' | 'invited' | 'cancelled'
   isGoalkeeper?: boolean
+  pickTeam?: 'A' | 'B'
+  encounterRole?: 'gk' | 'defensa' | 'mediocampista' | 'delantero'
+  /** Cupo visual en partidos rival (`gk`, `def_0`, `bench_0`, …). */
+  lineupSlot?: string
+}
+
+function parseEncounterRole(
+  raw: unknown
+): OpportunityParticipantRow['encounterRole'] | undefined {
+  if (
+    raw === 'gk' ||
+    raw === 'defensa' ||
+    raw === 'mediocampista' ||
+    raw === 'delantero'
+  ) {
+    return raw
+  }
+  return undefined
 }
 
 export async function fetchParticipantsForOpportunity(
@@ -233,7 +251,9 @@ export async function fetchParticipantsForOpportunity(
 
   const { data: parts } = await supabase
     .from('match_opportunity_participants')
-    .select('user_id, status, is_goalkeeper')
+    .select(
+      'user_id, status, is_goalkeeper, pick_team, encounter_lineup_role, lineup_slot'
+    )
     .eq('opportunity_id', opportunityId)
 
   const userIds = new Set<string>()
@@ -263,6 +283,12 @@ export async function fetchParticipantsForOpportunity(
       photo: (c?.photo_url as string) || DEFAULT_AVATAR,
       status: 'creator',
       isGoalkeeper: creatorPart ? creatorPart.is_goalkeeper === true : false,
+      pickTeam:
+        creatorPart?.pick_team === 'A' || creatorPart?.pick_team === 'B'
+          ? creatorPart.pick_team
+          : undefined,
+      encounterRole: parseEncounterRole(creatorPart?.encounter_lineup_role),
+      lineupSlot: (creatorPart?.lineup_slot as string | null) ?? undefined,
     })
   }
 
@@ -276,6 +302,10 @@ export async function fetchParticipantsForOpportunity(
       photo: (u?.photo_url as string) || DEFAULT_AVATAR,
       status: (p.status as OpportunityParticipantRow['status']) || 'pending',
       isGoalkeeper: p.is_goalkeeper === true,
+      pickTeam:
+        p.pick_team === 'A' || p.pick_team === 'B' ? p.pick_team : undefined,
+      encounterRole: parseEncounterRole(p.encounter_lineup_role),
+      lineupSlot: (p.lineup_slot as string | null) ?? undefined,
     })
   }
 

@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 
-import { createClient, isSupabaseConfigured } from './supabase/client'
+import { getSupabase, isSupabaseConfigured } from './supabase/client'
 
 export type ParticipantCounts = {
   gkCount: number
@@ -32,7 +32,7 @@ export function useMatchParticipantCounts(
     setLoading(true)
     void (async () => {
       try {
-        const sb = createClient()
+        const sb = getSupabase()
         const { data, error } = await sb
           .from('match_opportunity_participants')
           .select('is_goalkeeper, status')

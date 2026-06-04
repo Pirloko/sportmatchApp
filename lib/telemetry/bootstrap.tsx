@@ -3,7 +3,7 @@ import { usePathname } from 'expo-router'
 import { useEffect, useRef } from 'react'
 
 import { useApp } from '../app-provider'
-import { createClient, isSupabaseConfigured } from '../supabase/client'
+import { getSupabase, isSupabaseConfigured } from '../supabase/client'
 import { trackCrash } from './client'
 import {
   captureProductException,
@@ -28,7 +28,7 @@ export function TelemetryBootstrap() {
     if (!isSupabaseConfigured()) return
     if (startedRef.current) return
     startedRef.current = true
-    const supabase = createClient()
+    const supabase = getSupabase()
     trackProductEvent(ProductEventNames.appStarted, {
       userId: currentUser?.id ?? null,
       metadata: {
@@ -44,7 +44,7 @@ export function TelemetryBootstrap() {
     if (!pathname) return
     if (prevPathRef.current === pathname) return
     prevPathRef.current = pathname
-    const supabase = createClient()
+    const supabase = getSupabase()
     trackProductEvent(ProductEventNames.screenView, {
       userId: currentUser?.id ?? null,
       metadata: { pathname },
@@ -63,7 +63,7 @@ export function TelemetryBootstrap() {
       captureProductException(error, {
         extra: { isFatal: Boolean(isFatal), pathname: prevPathRef.current },
       })
-      const supabase = createClient()
+      const supabase = getSupabase()
       void trackCrash(supabase, {
         userId: currentUser?.id ?? null,
         message: error?.message || 'Unknown error',

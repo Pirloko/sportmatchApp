@@ -1,4 +1,5 @@
 import { Ionicons } from '@expo/vector-icons'
+import { Link } from 'expo-router'
 import { useEffect, useRef, useState } from 'react'
 import {
   AccessibilityInfo,
@@ -300,6 +301,21 @@ export function AuthScreen() {
           )}
         </Pressable>
 
+        <Text style={[styles.legalText, { color: colors.textMuted }]}>
+          Al continuar aceptas nuestros{' '}
+          <Link href="/terms" style={[styles.legalLink, { color: tokens.primaryGreen }]}>
+            Términos de Uso
+          </Link>{' '}
+          y{' '}
+          <Link
+            href="/privacy-policy"
+            style={[styles.legalLink, { color: tokens.primaryGreen }]}
+          >
+            Política de Privacidad
+          </Link>
+          .
+        </Text>
+
         <Pressable
           style={styles.link}
           onPress={() => {
@@ -584,6 +600,18 @@ const styles = StyleSheet.create({
   linkText: {
     color: '#9CA3A3',
     fontSize: 14,
+  },
+  legalText: {
+    fontSize: 12,
+    lineHeight: 18,
+    textAlign: 'center',
+    marginBottom: 4,
+    paddingHorizontal: 8,
+  },
+  legalLink: {
+    fontSize: 12,
+    fontWeight: '600',
+    textDecorationLine: 'underline',
   },
   error: {
     marginTop: 12,

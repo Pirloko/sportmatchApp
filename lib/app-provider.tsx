@@ -4,7 +4,6 @@ import type {
   SupabaseClient,
   User as SupabaseAuthUser,
 } from '@supabase/supabase-js'
-import * as Linking from 'expo-linking'
 import * as WebBrowser from 'expo-web-browser'
 import {
   createContext,
@@ -35,28 +34,35 @@ import type {
   User,
   VenueOnboardingData,
 } from './types'
-import { completeOAuthFromRedirectUrl } from './complete-oauth-redirect'
+import { authLog } from './auth/auth-debug'
 import {
-  getOAuthRedirectUri,
-  oauthRedirectHasCredentials,
-} from './oauth-redirect'
+  OAuthSessionError,
+  openOAuthAndResolveCallbackUrl,
+} from './auth/open-oauth-session'
+import { startGlobalOAuthCallbackCapture } from './auth/oauth-callback-handler'
+import { inspectAuthorizeUrl, logPkceRuntimeState } from './auth/pkce-inspect'
+import { completeOAuthFromRedirectUrl } from './complete-oauth-redirect'
+import { getOAuthRedirectUri } from './oauth-redirect'
 import {
   DEFAULT_AVATAR,
   mapMatchOpportunityFromDb,
   type MatchOpportunityRow,
 } from './supabase/mappers'
-import { createClient, isSupabaseConfigured } from './supabase/client'
+import { getSupabaseOrNull, isSupabaseConfigured } from './supabase/client'
 import {
   ProductEventNames,
   setAnalyticsUser,
   trackProductEvent,
 } from './telemetry/product-analytics'
 import { formatAuthError } from './supabase/auth-errors'
+import { buildFallbackUserFromAuth } from './supabase/auth-profile-fallback'
 import {
   fetchMatchOpportunities,
   fetchOtherProfiles,
-  fetchProfileForUser,
 } from './supabase/queries'
+import { deleteOwnAccount } from './supabase/delete-own-account'
+import { resolveAppUserFromAuth } from './supabase/resolve-app-user'
+import { savePlayerProfileFromOnboarding } from './supabase/save-player-profile'
 import {
   fetchTeamInvitesForUser,
   fetchTeamJoinRequestsForUser,
@@ -70,6 +76,14 @@ import {
   joinMatchOpportunityAction,
   type JoinMatchResult,
 } from './supabase/join-match-opportunity'
+import {
+  insertRivalCreatorParticipant,
+  leaveRivalMatchOpportunity as leaveRivalMatchOpportunityAction,
+} from './supabase/rival-lineup-actions'
+import {
+  defaultCaptainLineupSlot,
+  profilePositionToEncounterRole,
+} from './rival-lineup-slot'
 import { playersJoinRules } from './players-seek-profile'
 import {
   CREATE_PREFILL_STORAGE_KEY,
@@ -93,103 +107,6 @@ function isWebCallbackUrl(url: string): boolean {
   }
 }
 
-/**
- * Android: al volver con sportmatch:// Chrome Custom Tabs a veces devuelve cancel/dismiss
- * sin `url`, pero el callback llega por Linking. En web seguimos solo con WebBrowser.
- * No usar getInitialURL(): puede resolver sportmatch://auth/callback sin ?code= y cerrar
- * el flujo antes de abrir la pantalla de Google.
- */
-async function openOAuthAndResolveCallbackUrl(
-  oauthBrowserUrl: string,
-  redirectTo: string
-): Promise<string> {
-  if (Platform.OS === 'web') {
-    const authResult = await WebBrowser.openAuthSessionAsync(
-      oauthBrowserUrl,
-      redirectTo
-    )
-    if (authResult.type === 'success' && authResult.url) {
-      return authResult.url
-    }
-    throw new Error(
-      authResult.type === 'cancel'
-        ? 'Inicio con Google cancelado.'
-        : 'No se completó el inicio de sesión con Google.'
-    )
-  }
-
-  try {
-    await WebBrowser.warmUpAsync()
-  } catch {
-    /* opcional en algunos dispositivos */
-  }
-
-  return await new Promise((resolve, reject) => {
-    let settled = false
-    let dismissGraceTimer: ReturnType<typeof setTimeout> | undefined
-    let timeoutId: ReturnType<typeof setTimeout>
-    const cleanup = () => {
-      subscription.remove()
-      clearTimeout(timeoutId)
-      if (dismissGraceTimer) clearTimeout(dismissGraceTimer)
-    }
-
-    const finish = (url: string) => {
-      if (settled || !oauthRedirectHasCredentials(url)) return
-      settled = true
-      cleanup()
-      resolve(url)
-    }
-
-    const subscription = Linking.addEventListener('url', ({ url }) => {
-      finish(url)
-    })
-
-    timeoutId = setTimeout(() => {
-      if (!settled) {
-        settled = true
-        cleanup()
-        reject(new Error('Tiempo agotado al iniciar sesión con Google.'))
-      }
-    }, 120000)
-
-    void WebBrowser.openAuthSessionAsync(oauthBrowserUrl, redirectTo)
-      .then((authResult) => {
-        if (settled) return
-        if (authResult.type === 'success' && authResult.url) {
-          finish(authResult.url)
-          return
-        }
-        // Dar tiempo a que Linking entregue sportmatch://auth/callback?code=…
-        dismissGraceTimer = setTimeout(() => {
-          if (!settled) {
-            settled = true
-            cleanup()
-            reject(
-              new Error(
-                'No se recibió la respuesta del login en la app. Si cancelaste el navegador, inténtalo de nuevo.'
-              )
-            )
-          }
-        }, 10000)
-      })
-      .catch(() => {
-        if (settled) return
-        dismissGraceTimer = setTimeout(() => {
-          if (!settled) {
-            settled = true
-            cleanup()
-            reject(
-              new Error(
-                'No se recibió la respuesta del login en la app. Inténtalo de nuevo.'
-              )
-            )
-          }
-        }, 10000)
-      })
-  })
-}
-
 function isTeamLimitReached(err: unknown): boolean {
   if (!err || typeof err !== 'object') return false
   const e = err as { message?: unknown }
@@ -207,7 +124,7 @@ function getAuthUserEmail(u: SupabaseAuthUser): string | undefined {
 
 function needsOnboardingProfile(u: User): boolean {
   if (u.accountType !== 'player') return false
-  return u.name.trim().length < 2 || u.age < 16
+  return u.name.trim().length < 2 || u.age < 17
 }
 
 function isTeamPickMatchType(type: MatchType): boolean {
@@ -231,6 +148,8 @@ type AppContextType = {
   authLoading: boolean
   currentUser: User | null
   isAuthenticated: boolean
+  /** Re-hidrata currentUser desde la sesión Supabase (p. ej. tras OAuth en /auth/callback). */
+  syncAuthFromSession: () => Promise<boolean>
   needsOnboarding: boolean
   needsVenueOnboarding: boolean
   login: (
@@ -245,6 +164,8 @@ type AppContextType = {
     code: string
   ) => Promise<{ ok: boolean; matchId?: string; error?: string }>
   logout: () => Promise<void>
+  /** Elimina cuenta y datos en Supabase (RPC) + limpia sesión local. */
+  deleteAccount: () => Promise<{ ok: boolean; error?: string }>
   matchOpportunities: MatchOpportunity[]
   users: User[]
   teams: Team[]
@@ -271,8 +192,15 @@ type AppContextType = {
       teamPickTeam?: 'A' | 'B'
       teamPickRole?: 'gk' | 'defensa' | 'mediocampista' | 'delantero'
       teamPickJoinCode?: string
+      rivalPickTeam?: 'A' | 'B'
+      rivalLineupSlot?: string
+      rivalEncounterRole?: 'gk' | 'defensa' | 'mediocampista' | 'delantero'
     }
   ) => Promise<JoinMatchResult>
+  /** Abandonar encuentro rival (libera cupo). */
+  leaveRivalMatchOpportunity: (
+    opportunityId: string
+  ) => Promise<{ ok: boolean; error?: string }>
   respondToMatchInvitation: (
     opportunityId: string,
     accept: boolean
@@ -372,6 +300,7 @@ type AppContextType = {
       name?: string
       description?: string | null
       logo?: string | null
+      viceCaptainId?: string | null
     }
   ) => Promise<{ ok: boolean; error?: string }>
   deleteTeam: (teamId: string) => Promise<{ ok: boolean; error?: string }>
@@ -431,10 +360,7 @@ function setArrayStateIfChanged<T>(
 }
 
 export function AppProvider({ children }: { children: ReactNode }) {
-  const supabase = useMemo<SupabaseClient | null>(() => {
-    if (!isSupabaseConfigured()) return null
-    return createClient()
-  }, [])
+  const supabase = useMemo<SupabaseClient | null>(() => getSupabaseOrNull(), [])
 
   const [authLoading, setAuthLoading] = useState(true)
   const [currentUser, setCurrentUser] = useState<User | null>(null)
@@ -532,40 +458,57 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   const hydrateFromSession = useCallback(
     async (client: SupabaseClient, session: Session | null) => {
+      authLog('Hydrate', 'session exists', { exists: Boolean(session?.user) })
+      authLog('Hydrate', 'user id', { id: session?.user?.id ?? null })
+
       if (!session?.user) {
         setAnalyticsUser(null)
         setCurrentUser(null)
         clearLists()
+        authLog('CurrentUser', 'null (sin session.user)')
         return
       }
 
       const authUser = session.user
-      const email =
+      const emailRaw =
         authUser.email?.trim() || getAuthUserEmail(authUser)?.trim() || ''
-      if (!email) {
-        setAnalyticsUser(null)
-        setCurrentUser(null)
+      const email =
+        emailRaw ||
+        `${authUser.id.replace(/-/g, '').slice(0, 12)}@session.sportmatch`
+      if (!emailRaw) {
+        authLog('Hydrate', 'sin email en session.user — fallback interno', {
+          id: authUser.id,
+        })
+      }
+
+      const fallbackUser = buildFallbackUserFromAuth(authUser, email)
+      setCurrentUser(fallbackUser)
+      setAnalyticsUser({ id: fallbackUser.id, email: fallbackUser.email })
+      authLog('CurrentUser', 'set fallback inmediato (hydrate)', {
+        id: fallbackUser.id,
+        missing_db_profile: true,
+      })
+
+      const { user: appUser, source } = await resolveAppUserFromAuth(
+        client,
+        authUser,
+        email
+      )
+
+      setCurrentUser(appUser)
+      setAnalyticsUser({ id: appUser.id, email: appUser.email })
+      authLog('CurrentUser', 'set after hydrate', {
+        id: appUser.id,
+        source,
+        missing_db_profile: Boolean(appUser.missingDbProfile),
+      })
+
+      if (appUser.accountType === 'admin') {
         clearLists()
         return
       }
 
-      const profile = await fetchProfileForUser(client, authUser.id, email)
-      if (!profile) {
-        setAnalyticsUser(null)
-        setCurrentUser(null)
-        clearLists()
-        return
-      }
-
-      setCurrentUser(profile)
-      setAnalyticsUser({ id: profile.id, email: profile.email })
-
-      if (profile.accountType === 'admin') {
-        clearLists()
-        return
-      }
-
-      if (profile.accountType === 'venue') {
+      if (appUser.accountType === 'venue') {
         clearLists()
         const venueRow = await fetchVenueForOwner(client, authUser.id)
         setVenueForOwner(venueRow)
@@ -573,10 +516,27 @@ export function AppProvider({ children }: { children: ReactNode }) {
       }
 
       setVenueForOwner(null)
-      await fetchAndSetPlayerData(client, authUser.id, profile)
+      if (source === 'profiles') {
+        await fetchAndSetPlayerData(client, authUser.id, appUser)
+      }
     },
     [clearLists, fetchAndSetPlayerData]
   )
+
+  const syncAuthFromSession = useCallback(async (): Promise<boolean> => {
+    if (!supabase) return false
+    const {
+      data: { session },
+    } = await supabase.auth.getSession()
+    if (!session?.user) return false
+    await hydrateFromSession(supabase, session)
+    return true
+  }, [supabase, hydrateFromSession])
+
+  useEffect(() => {
+    const stopCapture = startGlobalOAuthCallbackCapture()
+    return stopCapture
+  }, [])
 
   useEffect(() => {
     if (!supabase) {
@@ -597,13 +557,25 @@ export function AppProvider({ children }: { children: ReactNode }) {
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
       async (event, session) => {
         if (!mounted) return
+        authLog('AuthState', event, {
+          has_session: Boolean(session),
+          user_id: session?.user?.id ?? null,
+          expires_at: session?.expires_at ?? null,
+        })
         if (event === 'SIGNED_OUT') {
           setAnalyticsUser(null)
           setCurrentUser(null)
           clearLists()
+          authLog('Session', 'SIGNED_OUT → currentUser null')
           return
         }
-        if (event === 'SIGNED_IN' && session) {
+        if (
+          (event === 'SIGNED_IN' ||
+            event === 'INITIAL_SESSION' ||
+            event === 'TOKEN_REFRESHED') &&
+          session
+        ) {
+          authLog('Session', `hydrate tras ${event}`)
           await hydrateFromSession(supabase, session)
         }
       }
@@ -614,6 +586,15 @@ export function AppProvider({ children }: { children: ReactNode }) {
       subscription.unsubscribe()
     }
   }, [supabase, hydrateFromSession, clearLists])
+
+  useEffect(() => {
+    authLog('AuthLoading', String(authLoading))
+    authLog('CurrentUser', 'state', {
+      id: currentUser?.id ?? null,
+      email: currentUser?.email ?? null,
+      missing_db_profile: currentUser?.missingDbProfile ?? null,
+    })
+  }, [authLoading, currentUser])
 
   const login = useCallback(
     async (
@@ -717,15 +698,16 @@ export function AppProvider({ children }: { children: ReactNode }) {
           return fail('No se pudo obtener la sesión.')
         }
 
-        const profile = await fetchProfileForUser(supabase, user.id, userEmail)
-        if (!profile) {
-          return fail('No se encontró el perfil.')
-        }
+        const { user: appUser, source } = await resolveAppUserFromAuth(
+          supabase,
+          user,
+          userEmail
+        )
 
-        setCurrentUser(profile)
-        recordAuthSuccess(profile)
+        setCurrentUser(appUser)
+        recordAuthSuccess(appUser)
 
-        if (profile.accountType === 'admin') {
+        if (appUser.accountType === 'admin') {
           clearLists()
           return {
             ok: true,
@@ -735,7 +717,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
           }
         }
 
-        if (profile.accountType === 'venue') {
+        if (appUser.accountType === 'venue') {
           clearLists()
           const venueRow = await fetchVenueForOwner(supabase, user.id)
           setVenueForOwner(venueRow)
@@ -747,12 +729,16 @@ export function AppProvider({ children }: { children: ReactNode }) {
           }
         }
 
-        await fetchAndSetPlayerData(supabase, user.id, profile)
+        if (source === 'profiles') {
+          await fetchAndSetPlayerData(supabase, user.id, appUser)
+        }
         setVenueForOwner(null)
 
         return {
           ok: true,
-          needsOnboarding: needsOnboardingProfile(profile),
+          needsOnboarding:
+            appUser.missingDbProfile === true ||
+            needsOnboardingProfile(appUser),
           isVenue: false,
         }
       } catch (e) {
@@ -826,7 +812,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
             })
           }
         }
+        logPkceRuntimeState()
         const redirectTo = getOAuthRedirectUri()
+        authLog('OAuth', 'iniciando signInWithOAuth', { redirectTo, isSignUp })
         const { data, error } = await supabase.auth.signInWithOAuth({
           provider: 'google',
           options: {
@@ -845,13 +833,23 @@ export function AppProvider({ children }: { children: ReactNode }) {
           return fail('No se pudo iniciar Google OAuth.')
         }
 
+        inspectAuthorizeUrl(data.url)
+
         let authCallbackUrl: string
         try {
           authCallbackUrl = await openOAuthAndResolveCallbackUrl(data.url, redirectTo)
         } catch (oauthErr) {
           const msg =
-            oauthErr instanceof Error ? oauthErr.message : 'Error en login con Google.'
-          return fail(msg, { oauth_step: 'browser_or_linking' })
+            oauthErr instanceof OAuthSessionError
+              ? oauthErr.message
+              : oauthErr instanceof Error
+                ? oauthErr.message
+                : 'Error en login con Google.'
+          return fail(msg, {
+            oauth_step: 'browser_or_linking',
+            oauth_code:
+              oauthErr instanceof OAuthSessionError ? oauthErr.code : undefined,
+          })
         }
 
         if (isWebCallbackUrl(authCallbackUrl)) {
@@ -861,13 +859,28 @@ export function AppProvider({ children }: { children: ReactNode }) {
           )
         }
 
-        const oauthDone = await completeOAuthFromRedirectUrl(
-          supabase,
-          authCallbackUrl
-        )
-        if (!oauthDone.ok) {
-          return fail(oauthDone.error, { oauth_step: 'exchange_code' })
+        const { data: { session: preExchangeSession } } =
+          await supabase.auth.getSession()
+        if (!preExchangeSession?.user) {
+          const oauthDone = await completeOAuthFromRedirectUrl(
+            authCallbackUrl,
+            supabase
+          )
+          if (!oauthDone.ok) {
+            return fail(oauthDone.error, { oauth_step: 'exchange_code' })
+          }
+        } else {
+          authLog('Exchange', 'skip en loginWithGoogle: sesión ya en cliente', {
+            user_id: preExchangeSession.user.id,
+          })
         }
+
+        const { data: { session: postExchangeSession } } =
+          await supabase.auth.getSession()
+        authLog('Session', 'post loginWithGoogle exchange', {
+          has_session: Boolean(postExchangeSession),
+          user_id: postExchangeSession?.user?.id ?? null,
+        })
 
         const {
           data: { user },
@@ -881,18 +894,21 @@ export function AppProvider({ children }: { children: ReactNode }) {
           return fail('No se pudo obtener el email de la sesión.')
         }
 
-        const profile = await fetchProfileForUser(supabase, user.id, userEmail)
-        if (!profile) {
-          return fail(
-            'El usuario autenticó con Google, pero no existe perfil en la base. Revisa trigger/proceso de alta de perfiles en Supabase.',
-            { reason: 'profile_missing' }
-          )
-        }
+        const { user: appUser, source } = await resolveAppUserFromAuth(
+          supabase,
+          user,
+          userEmail
+        )
 
-        setCurrentUser(profile)
-        recordAuthSuccess(profile)
+        setCurrentUser(appUser)
+        authLog('Session', 'loginWithGoogle setCurrentUser', {
+          profile_id: appUser.id,
+          account_type: appUser.accountType,
+          source,
+        })
+        recordAuthSuccess(appUser)
 
-        if (profile.accountType === 'admin') {
+        if (appUser.accountType === 'admin') {
           clearLists()
           return {
             ok: true,
@@ -902,7 +918,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
           }
         }
 
-        if (profile.accountType === 'venue') {
+        if (appUser.accountType === 'venue') {
           clearLists()
           const venueRow = await fetchVenueForOwner(supabase, user.id)
           setVenueForOwner(venueRow)
@@ -914,11 +930,15 @@ export function AppProvider({ children }: { children: ReactNode }) {
           }
         }
 
-        await fetchAndSetPlayerData(supabase, user.id, profile)
+        if (source === 'profiles') {
+          await fetchAndSetPlayerData(supabase, user.id, appUser)
+        }
         setVenueForOwner(null)
         return {
           ok: true,
-          needsOnboarding: needsOnboardingProfile(profile),
+          needsOnboarding:
+            appUser.missingDbProfile === true ||
+            needsOnboardingProfile(appUser),
           isVenue: false,
         }
       } catch (e) {
@@ -987,35 +1007,22 @@ export function AppProvider({ children }: { children: ReactNode }) {
       if (currentUser.accountType !== 'player') {
         return { ok: false, error: 'Solo aplica a cuentas jugador.' }
       }
-      const photo = data.photo || DEFAULT_AVATAR
-      const { error } = await supabase
-        .from('profiles')
-        .update({
-          name: data.name,
-          age: data.age,
-          gender: data.gender,
-          whatsapp_phone: data.whatsappPhone.trim(),
-          position: data.position,
-          level: data.level,
-          city: data.city,
-          availability: data.availability,
-          photo_url: photo,
-        })
-        .eq('id', currentUser.id)
-
-      if (error) {
-        return { ok: false, error: error.message }
+      const saved = await savePlayerProfileFromOnboarding(
+        supabase,
+        currentUser.id,
+        currentUser.email,
+        data
+      )
+      if (!saved.ok) {
+        return { ok: false, error: saved.error }
       }
 
-      const nextUser: User = {
-        ...currentUser,
-        ...data,
-        whatsappPhone: data.whatsappPhone.trim(),
-        photo,
-        email: currentUser.email,
-        createdAt: currentUser.createdAt,
-      }
+      const nextUser = saved.user
       setCurrentUser(nextUser)
+      authLog('CurrentUser', 'post completeOnboarding', {
+        id: nextUser.id,
+        missing_db_profile: Boolean(nextUser.missingDbProfile),
+      })
 
       if (onboardingSource === 'profile_edit') {
         setOnboardingSource('registration')
@@ -1383,12 +1390,19 @@ export function AppProvider({ children }: { children: ReactNode }) {
         })
         .eq('id', challenge.opportunityId)
 
-      await supabase.from('match_opportunity_participants').upsert({
-        opportunity_id: challenge.opportunityId,
-        user_id: currentUser.id,
-        status: 'confirmed',
-        is_goalkeeper: false,
-      })
+      const awayRole = profilePositionToEncounterRole(currentUser.position)
+      const awaySlot = defaultCaptainLineupSlot(awayRole)
+      const capPart = await insertRivalCreatorParticipant(
+        supabase,
+        challenge.opportunityId,
+        currentUser.id,
+        awayRole,
+        awaySlot,
+        'B'
+      )
+      if (!capPart.ok) {
+        return { ok: false, error: capPart.error }
+      }
 
       const [freshChallenges, matches, partIds] = await Promise.all([
         fetchRivalChallengesForUser(supabase, currentUser.id),
@@ -1404,6 +1418,26 @@ export function AppProvider({ children }: { children: ReactNode }) {
     [currentUser, supabase, rivalChallenges, teams]
   )
 
+  const leaveRivalMatchOpportunity = useCallback(
+    async (opportunityId: string): Promise<{ ok: boolean; error?: string }> => {
+      if (!currentUser || !supabase) {
+        return { ok: false, error: 'Sesión no disponible.' }
+      }
+      const result = await leaveRivalMatchOpportunityAction(supabase, opportunityId)
+      if (!result.ok) {
+        return { ok: false, error: result.error }
+      }
+      const [partIds, matches] = await Promise.all([
+        fetchParticipatingOpportunityIds(supabase, currentUser.id),
+        fetchMatchOpportunities(supabase),
+      ])
+      setParticipatingOpportunityIdsStable(partIds)
+      setMatchOpportunitiesStable(matches)
+      return { ok: true }
+    },
+    [currentUser, supabase]
+  )
+
   const joinMatchOpportunity = useCallback(
     async (
       opportunityId: string,
@@ -1412,6 +1446,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
         teamPickTeam?: 'A' | 'B'
         teamPickRole?: 'gk' | 'defensa' | 'mediocampista' | 'delantero'
         teamPickJoinCode?: string
+        rivalPickTeam?: 'A' | 'B'
+        rivalLineupSlot?: string
+        rivalEncounterRole?: 'gk' | 'defensa' | 'mediocampista' | 'delantero'
       }
     ): Promise<JoinMatchResult> => {
       if (!currentUser || !supabase) {
@@ -1420,19 +1457,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
       const opp = matchOpportunities.find((m) => m.id === opportunityId)
       if (!opp) {
         return { ok: false, error: 'No encontramos este partido.' }
-      }
-      if (isTeamPickMatchType(opp.type)) {
-        const hasTeam = teams.some(
-          (t) =>
-            t.captainId === currentUser.id ||
-            t.members.some((m) => m.id === currentUser.id)
-        )
-        if (!hasTeam) {
-          return {
-            ok: false,
-            error: 'Para team pick debes pertenecer a un equipo.',
-          }
-        }
       }
       const result = await joinMatchOpportunityAction(
         supabase,
@@ -1486,19 +1510,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
       if (invitedErr) return { ok: false, error: invitedErr.message }
       if (!invitedRow || invitedRow.status !== 'invited') {
         return { ok: false, error: 'No existe una invitación pendiente.' }
-      }
-      if (accept && isTeamPickMatchType(opp.type)) {
-        const hasTeam = teams.some(
-          (t) =>
-            t.captainId === currentUser.id ||
-            t.members.some((m) => m.id === currentUser.id)
-        )
-        if (!hasTeam) {
-          return {
-            ok: false,
-            error: 'Para team pick debes pertenecer a un equipo.',
-          }
-        }
       }
 
       let invitationAccepted = false
@@ -1694,6 +1705,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         name?: string
         description?: string | null
         logo?: string | null
+        viceCaptainId?: string | null
       }
     ): Promise<{ ok: boolean; error?: string }> => {
       if (!currentUser || !supabase) {
@@ -1721,6 +1733,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
       }
       if (updates.logo !== undefined) {
         row.logo_url = updates.logo
+      }
+      if (updates.viceCaptainId !== undefined) {
+        row.vice_captain_id = updates.viceCaptainId
       }
 
       const { error } = await supabase
@@ -2443,12 +2458,28 @@ export function AppProvider({ children }: { children: ReactNode }) {
           team_name: payload.challengerTeam.name,
           gender: currentUser.gender,
           status: 'pending',
+          players_needed: 18,
+          players_joined: 1,
         })
         .select('*')
         .single()
 
       if (oppErr || !oppData) {
         return { ok: false, error: oppErr?.message ?? 'No se pudo crear el desafío' }
+      }
+
+      const captainRole = profilePositionToEncounterRole(currentUser.position)
+      const captainSlot = defaultCaptainLineupSlot(captainRole)
+      const creatorPart = await insertRivalCreatorParticipant(
+        supabase,
+        oppData.id as string,
+        currentUser.id,
+        captainRole,
+        captainSlot
+      )
+      if (!creatorPart.ok) {
+        await supabase.from('match_opportunities').delete().eq('id', oppData.id)
+        return { ok: false, error: creatorPart.error }
       }
 
       const challengeInsert = {
@@ -2473,18 +2504,14 @@ export function AppProvider({ children }: { children: ReactNode }) {
         return { ok: false, error: chErr.message }
       }
 
-      const row = oppData as MatchOpportunityRow
-      const mapped = mapMatchOpportunityFromDb(row, {
-        id: currentUser.id,
-        name: currentUser.name,
-        photo_url: currentUser.photo,
-      })
-      setMatchOpportunities((prev) => [mapped, ...prev])
-      const freshChallenges = await fetchRivalChallengesForUser(
-        supabase,
-        currentUser.id
-      )
+      const [freshChallenges, matches, partIds] = await Promise.all([
+        fetchRivalChallengesForUser(supabase, currentUser.id),
+        fetchMatchOpportunities(supabase),
+        fetchParticipatingOpportunityIds(supabase, currentUser.id),
+      ])
+      setMatchOpportunitiesStable(matches)
       setRivalChallengesStable(freshChallenges)
+      setParticipatingOpportunityIdsStable(partIds)
       trackProductEvent(ProductEventNames.matchCreateSuccess, {
         userId: currentUser.id,
         metadata: {
@@ -2527,19 +2554,57 @@ export function AppProvider({ children }: { children: ReactNode }) {
     clearLists()
   }, [supabase, clearLists])
 
+  const deleteAccount = useCallback(async (): Promise<{ ok: boolean; error?: string }> => {
+    if (!isSupabaseConfigured() || !supabase || !currentUser) {
+      return { ok: false, error: 'Sesión no disponible.' }
+    }
+    const result = await deleteOwnAccount(supabase)
+    if (!result.ok) {
+      return { ok: false, error: result.error }
+    }
+    setAnalyticsUser(null)
+    try {
+      await supabase.auth.signOut({ scope: 'local' })
+    } catch {
+      // usuario ya eliminado en servidor
+    }
+    try {
+      await AsyncStorage.multiRemove([
+        JOIN_TEAM_STORAGE_KEY,
+        JOIN_MATCH_STORAGE_KEY,
+        JOIN_REGISTER_STORAGE_KEY,
+        OPEN_CREATE_AFTER_AUTH_KEY,
+        CREATE_PREFILL_STORAGE_KEY,
+        PENDING_TEAM_FOCUS_STORAGE_KEY,
+        PLAYER_LAST_NAV_STORAGE_KEY,
+        RIVAL_TARGET_TEAM_STORAGE_KEY,
+      ])
+    } catch {
+      // ignore
+    }
+    setOnboardingSource('registration')
+    setCurrentUser(null)
+    clearLists()
+    return { ok: true }
+  }, [supabase, currentUser, clearLists])
+
   const value = useMemo<AppContextType>(
     () => ({
       authLoading,
       currentUser,
       isAuthenticated: currentUser !== null,
+      syncAuthFromSession,
       needsOnboarding:
-        currentUser !== null && needsOnboardingProfile(currentUser),
+        currentUser !== null &&
+        (needsOnboardingProfile(currentUser) ||
+          currentUser.missingDbProfile === true),
       needsVenueOnboarding:
         currentUser?.accountType === 'venue' && venueForOwner === null,
       login,
       loginWithGoogle,
       resolveTeamPickPrivateJoinCode,
       logout,
+      deleteAccount,
       matchOpportunities,
       users,
       teams,
@@ -2555,6 +2620,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       completeVenueOnboarding,
       refreshMatchData,
       joinMatchOpportunity,
+      leaveRivalMatchOpportunity,
       respondToMatchInvitation,
       finalizeMatchOpportunity,
       suspendMatchOpportunity,
@@ -2587,6 +2653,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     [
       authLoading,
       currentUser,
+      syncAuthFromSession,
       matchOpportunities,
       users,
       teams,
@@ -2601,12 +2668,14 @@ export function AppProvider({ children }: { children: ReactNode }) {
       loginWithGoogle,
       resolveTeamPickPrivateJoinCode,
       logout,
+      deleteAccount,
       openProfileEditor,
       exitProfileEditor,
       completeOnboarding,
       completeVenueOnboarding,
       refreshMatchData,
       joinMatchOpportunity,
+      leaveRivalMatchOpportunity,
       respondToMatchInvitation,
       finalizeMatchOpportunity,
       suspendMatchOpportunity,

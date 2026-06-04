@@ -10,8 +10,10 @@ import {
   PENDING_TEAM_FOCUS_STORAGE_KEY,
 } from '../lib/storage-keys'
 import { isValidTeamInviteId } from '../lib/team-invite-url'
+import { useScreenTheme } from '../lib/theme-ui'
 
 export function PlayerEntryRedirect() {
+  const theme = useScreenTheme()
   const { setTeamsDetailFocusTeamId } = useApp()
   const [href, setHref] = useState<'/crear' | '/equipos' | '/home' | null>(null)
 
@@ -40,8 +42,8 @@ export function PlayerEntryRedirect() {
 
   if (href === null) {
     return (
-      <View style={styles.center}>
-        <ActivityIndicator size="large" />
+      <View style={[styles.center, { backgroundColor: theme.bg }]}>
+        <ActivityIndicator size="large" color={theme.primary} />
       </View>
     )
   }
@@ -54,6 +56,5 @@ const styles = StyleSheet.create({
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
-    backgroundColor: '#fff',
   },
 })

@@ -1,5 +1,4 @@
 import { Ionicons } from '@expo/vector-icons'
-import { FlashList, type ListRenderItemInfo } from '@shopify/flash-list'
 import * as ImagePicker from 'expo-image-picker'
 import { Image } from 'expo-image'
 import { router } from 'expo-router'
@@ -7,6 +6,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import {
   ActivityIndicator,
   Alert,
+  FlatList,
   Linking,
   Pressable,
   ScrollView,
@@ -15,6 +15,7 @@ import {
   Text,
   TextInput,
   View,
+  type ListRenderItemInfo,
 } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
 
@@ -22,15 +23,14 @@ import { levelLabel } from '../lib/format-match'
 import { saveRivalTargetTeamId } from '../lib/rival-prefill'
 import { teamInviteAbsoluteUrl } from '../lib/team-invite-url'
 import { useApp } from '../lib/app-provider'
-import { useThemePreference } from '../lib/theme-context'
-import { createClient, isSupabaseConfigured } from '../lib/supabase/client'
+import { useScreenTheme } from '../lib/theme-ui'
+import { getSupabase, isSupabaseConfigured } from '../lib/supabase/client'
 import { fetchTeamPrivateSettings } from '../lib/supabase/team-queries'
 import {
   deleteTeamLogoFile,
   uploadTeamLogoFromUri,
 } from '../lib/supabase/team-logos'
 import {
-  rankTeamsByRivalRecord,
   rosterCountForDisplay,
   teamIsInPlayerGeo,
   teamRivalFogueo,
@@ -61,6 +61,145 @@ function positionLabel(p: string): string {
   return POSITION_LABELS[p] ?? p
 }
 
+function memberInitials(name: string): string {
+  const parts = name.trim().split(/\s+/).filter(Boolean)
+  if (parts.length >= 2) {
+    return `${parts[0]?.[0] ?? ''}${parts[1]?.[0] ?? ''}`.toUpperCase()
+  }
+  return (parts[0]?.slice(0, 2) ?? '?').toUpperCase()
+}
+
+function avatarColorForName(name: string): string {
+  const palette = ['#0F4539', '#2563EB', '#7C3AED', '#DC2626', '#D97706', '#0891B2']
+  let idx = 0
+  for (let i = 0; i < name.length; i++) {
+    idx = (idx + name.charCodeAt(i) * 17) % palette.length
+  }
+  return palette[idx] ?? palette[0]
+}
+
+function parseRulesLines(text: string | null | undefined): string[] {
+  if (!text?.trim()) return []
+  return text
+    .split(/\n+/)
+    .map((line) => line.replace(/^\d+[\).\-\s]+/, '').trim())
+    .filter(Boolean)
+}
+
+function TeamMemberAvatar({
+  photo,
+  name,
+  size = 44,
+}: {
+  photo: string
+  name: string
+  size?: number
+}) {
+  if (photo?.trim()) {
+    return (
+      <Image
+        source={{ uri: photo }}
+        style={{ width: size, height: size, borderRadius: size / 2 }}
+        contentFit="cover"
+      />
+    )
+  }
+  const bg = avatarColorForName(name)
+  return (
+    <View
+      style={{
+        width: size,
+        height: size,
+        borderRadius: size / 2,
+        backgroundColor: bg,
+        alignItems: 'center',
+        justifyContent: 'center',
+      }}
+    >
+      <Text style={{ color: '#fff', fontWeight: '800', fontSize: size * 0.34 }}>
+        {memberInitials(name)}
+      </Text>
+    </View>
+  )
+}
+
+function TeamRulesList({
+  rules,
+  theme,
+  ui,
+  styles,
+}: {
+  rules: string[]
+  theme: ReturnType<typeof useScreenTheme>
+  ui: {
+    logoBoxBg: string
+    logoBoxBorder: string
+    primaryAccent: string
+  }
+  styles: ReturnType<typeof createStyles>
+}) {
+  if (rules.length === 0) return null
+  return (
+    <View
+      style={[
+        styles.teamRulesCard,
+        { backgroundColor: theme.card, borderColor: theme.border },
+      ]}
+    >
+      <View style={styles.teamRulesHeader}>
+        <View
+          style={[
+            styles.teamRulesIconWrap,
+            {
+              backgroundColor: ui.logoBoxBg,
+              borderColor: ui.logoBoxBorder,
+            },
+          ]}
+        >
+          <Ionicons name="list-outline" size={18} color={ui.primaryAccent} />
+        </View>
+        <View style={{ flex: 1 }}>
+          <Text style={[styles.teamRulesTitle, { color: theme.text }]}>
+            Reglas del equipo
+          </Text>
+          <Text style={[styles.teamRulesSub, { color: theme.textMuted }]}>
+            {rules.length} {rules.length === 1 ? 'norma acordada' : 'normas acordadas'}
+          </Text>
+        </View>
+      </View>
+      <View style={styles.teamRulesList}>
+        {rules.map((rule, idx) => (
+          <View
+            key={`${idx}-${rule.slice(0, 12)}`}
+            style={[
+              styles.teamRuleRow,
+              idx > 0 && [
+                styles.teamRuleRowDivider,
+                { borderTopColor: theme.border },
+              ],
+            ]}
+          >
+            <View
+              style={[
+                styles.teamRuleNum,
+                {
+                  backgroundColor: ui.logoBoxBg,
+                  borderColor: ui.logoBoxBorder,
+                },
+              ]}
+            >
+              <Text style={[styles.teamRuleNumText, { color: ui.primaryAccent }]}>
+                {idx + 1}
+              </Text>
+            </View>
+            <Text style={[styles.teamRuleText, { color: theme.text }]}>{rule}</Text>
+          </View>
+        ))}
+      </View>
+    </View>
+  )
+}
+
 export function TeamsScreen() {
   const {
     currentUser,
@@ -85,7 +224,8 @@ export function TeamsScreen() {
     teamsDetailFocusTeamId,
     setTeamsDetailFocusTeamId,
   } = useApp()
-  const { tokens, resolved } = useThemePreference()
+  const theme = useScreenTheme()
+  const styles = useMemo(() => createStyles(theme), [theme])
 
   const [view, setView] = useState<TeamsView>('list')
   const [selectedTeam, setSelectedTeam] = useState<Team | null>(null)
@@ -107,7 +247,6 @@ export function TeamsScreen() {
   const [challengeTeamPick, setChallengeTeamPick] = useState<
     Record<string, string>
   >({})
-  const [discoverTab, setDiscoverTab] = useState<'region' | 'ranking'>('region')
 
   const userTeams = getUserTeams()
   const myCaptainTeams = userTeams.filter((t) => t.captainId === currentUser?.id)
@@ -120,7 +259,7 @@ export function TeamsScreen() {
       .filter((t) => teamIsInPlayerGeo(currentUser, t))
   }, [currentUser, getFilteredTeams, userTeams])
 
-  const regionOrderedTeams = useMemo(
+  const discoverList = useMemo(
     () =>
       [...discoverPool].sort((a, b) =>
         a.name.localeCompare(b.name, 'es', { sensitivity: 'base' })
@@ -128,28 +267,19 @@ export function TeamsScreen() {
     [discoverPool]
   )
 
-  const rankingOrderedTeams = useMemo(
-    () => rankTeamsByRivalRecord(discoverPool),
-    [discoverPool]
-  )
-
-  const discoverList =
-    discoverTab === 'region' ? regionOrderedTeams : rankingOrderedTeams
-
   const ui = useMemo(
     () => ({
-      statWinBg:
-        resolved === 'dark' ? 'rgba(55, 214, 122, 0.18)' : 'rgba(47, 158, 68, 0.12)',
-      statDrawBg:
-        resolved === 'dark' ? 'rgba(251, 191, 36, 0.16)' : 'rgba(245, 158, 11, 0.14)',
-      statLossBg:
-        resolved === 'dark' ? 'rgba(248, 113, 113, 0.14)' : 'rgba(239, 68, 68, 0.1)',
-      logoBoxBg:
-        resolved === 'dark' ? 'rgba(55, 214, 122, 0.15)' : 'rgba(47, 158, 68, 0.12)',
-      tabInactiveBg:
-        resolved === 'dark' ? 'rgba(255,255,255,0.06)' : '#e5e7eb',
+      statWinBg: theme.statWinBg,
+      statDrawBg: theme.statDrawBg,
+      statLossBg: theme.statLossBg,
+      logoBoxBg: theme.logoBoxBg,
+      logoBoxBorder: theme.logoBoxBorder,
+      primaryAccent: theme.primaryAccent,
+      dangerSurface: theme.dangerSurface,
+      dangerOnSurface: theme.dangerOnSurface,
+      accentOnSurface: theme.accentOnSurface,
     }),
-    [resolved]
+    [theme]
   )
 
   const pendingInvites = teamInvites.filter(
@@ -232,7 +362,7 @@ export function TeamsScreen() {
     let cancelled = false
     setLoadingPrivateSettings(true)
     void (async () => {
-      const supabase = createClient()
+      const supabase = getSupabase()
       const s = await fetchTeamPrivateSettings(supabase, detailTeam.id)
       if (!cancelled) {
         setMemberPrivateSettings(s)
@@ -328,7 +458,7 @@ export function TeamsScreen() {
     const asset = result.assets[0]
     setSavingTeam(true)
     try {
-      const supabase = createClient()
+      const supabase = getSupabase()
       const up = await uploadTeamLogoFromUri(
         supabase,
         detailTeam.id,
@@ -353,7 +483,7 @@ export function TeamsScreen() {
     setSavingTeam(true)
     try {
       if (isSupabaseConfigured()) {
-        const supabase = createClient()
+        const supabase = getSupabase()
         await deleteTeamLogoFile(supabase, detailTeam.id)
       }
       const r = await updateTeam(detailTeam.id, { logo: null })
@@ -379,11 +509,54 @@ export function TeamsScreen() {
     )
   }
 
+  const pickViceCaptain = (team: Team) => {
+    const candidates = team.members.filter(
+      (m) => m.id !== team.captainId && m.status === 'confirmed'
+    )
+    if (candidates.length === 0) {
+      Alert.alert(
+        'Vicecapitán',
+        'No hay jugadores confirmados para designar como vicecapitán.'
+      )
+      return
+    }
+    Alert.alert(
+      'Vicecapitán',
+      'Elige quién ayudará a coordinar el equipo.',
+      [
+        {
+          text: 'Sin vicecapitán',
+          onPress: () => {
+            void updateTeam(team.id, { viceCaptainId: null }).then((r) => {
+              if (!r.ok && r.error) Alert.alert('Vicecapitán', r.error)
+            })
+          },
+        },
+        ...candidates.map((m) => ({
+          text: m.name,
+          onPress: () => {
+            void updateTeam(team.id, { viceCaptainId: m.id }).then((r) => {
+              if (!r.ok && r.error) Alert.alert('Vicecapitán', r.error)
+            })
+          },
+        })),
+        { text: 'Cancelar', style: 'cancel' as const },
+      ]
+    )
+  }
+
+  const goBackFromDetail = () => {
+    setTeamDetailEditing(false)
+    setEditingCoord(false)
+    setSelectedTeam(null)
+    setView('list')
+  }
+
   const doDeleteTeam = async () => {
     if (!detailTeam) return
     try {
       if (detailTeam.logo && isSupabaseConfigured()) {
-        const supabase = createClient()
+        const supabase = getSupabase()
         await deleteTeamLogoFile(supabase, detailTeam.id)
       }
     } catch {
@@ -455,7 +628,7 @@ export function TeamsScreen() {
         key={team.id}
         style={[
           styles.myTeamCard,
-          { backgroundColor: tokens.cardDark, borderColor: tokens.borderDark },
+          { backgroundColor: theme.card, borderColor: theme.border },
         ]}
         onPress={() => {
           setSelectedTeam(team)
@@ -476,26 +649,26 @@ export function TeamsScreen() {
                 contentFit="cover"
               />
             ) : (
-              <Ionicons name="shield" size={26} color={tokens.primaryGreen} />
+              <Ionicons name="shield" size={26} color={ui.primaryAccent} />
             )}
           </View>
           <View style={styles.cardMid}>
             <View style={styles.cardTitleRow}>
               <Text
-                style={[styles.cardTitle, { color: tokens.textPrimary }]}
+                style={[styles.cardTitle, { color: theme.text }]}
                 numberOfLines={1}
               >
                 {team.name}
               </Text>
               {isCaptain ? (
-                <Ionicons name="ribbon" size={16} color={tokens.accentGold} />
+                <Ionicons name="ribbon" size={16} color={theme.accent} />
               ) : null}
             </View>
-            <Text style={[styles.cardMeta, { color: tokens.textMuted }]}>
+            <Text style={[styles.cardMeta, { color: theme.textMuted }]}>
               {LEVEL_LABELS[team.level]} · {roster}/{TEAM_ROSTER_MAX} jugadores
             </Text>
           </View>
-          <Ionicons name="chevron-forward" size={20} color={tokens.textMuted} />
+          <Ionicons name="chevron-forward" size={20} color={theme.textMuted} />
         </View>
       </Pressable>
     )
@@ -522,9 +695,9 @@ export function TeamsScreen() {
         style={[
           styles.discoverCard,
           {
-            backgroundColor: tokens.cardDark,
-            borderColor: tokens.borderDark,
-            shadowColor: resolved === 'dark' ? '#000' : '#000',
+            backgroundColor: theme.card,
+            borderColor: theme.border,
+            shadowColor: theme.isDark ? '#000' : '#000',
           },
         ]}
       >
@@ -540,10 +713,10 @@ export function TeamsScreen() {
               <View
                 style={[
                   styles.rankBadge,
-                  { backgroundColor: ui.logoBoxBg, borderColor: tokens.borderDark },
+                  { backgroundColor: ui.logoBoxBg, borderColor: ui.logoBoxBorder },
                 ]}
               >
-                <Text style={[styles.rankBadgeText, { color: tokens.primaryGreen }]}>
+                <Text style={[styles.rankBadgeText, { color: ui.primaryAccent }]}>
                   {rankIndex}
                 </Text>
               </View>
@@ -562,31 +735,35 @@ export function TeamsScreen() {
                   contentFit="cover"
                 />
               ) : (
-                <Ionicons name="shield" size={28} color={tokens.primaryGreen} />
+                <Ionicons name="shield" size={28} color={ui.primaryAccent} />
               )}
             </View>
             <View style={styles.cardMid}>
               <View style={styles.cardTitleRow}>
                 <Text
-                  style={[styles.cardTitle, { color: tokens.textPrimary }]}
+                  style={[styles.cardTitle, { color: theme.text }]}
                   numberOfLines={2}
                 >
                   {team.name}
                 </Text>
-                <Ionicons name="chevron-forward" size={18} color={tokens.textMuted} />
+                <Ionicons name="chevron-forward" size={18} color={theme.textMuted} />
               </View>
               <View style={styles.discoverBadgesRow}>
                 <View
                   style={[
                     styles.levelPill,
-                    { backgroundColor: ui.logoBoxBg },
+                    {
+                      backgroundColor: ui.logoBoxBg,
+                      borderWidth: 1,
+                      borderColor: ui.logoBoxBorder,
+                    },
                   ]}
                 >
-                  <Text style={[styles.levelPillText, { color: tokens.primaryGreen }]}>
+                  <Text style={[styles.levelPillText, { color: ui.primaryAccent }]}>
                     {LEVEL_LABELS[team.level]}
                   </Text>
                 </View>
-                <Text style={[styles.rosterHint, { color: tokens.textMuted }]}>
+                <Text style={[styles.rosterHint, { color: theme.textMuted }]}>
                   {roster}/{TEAM_ROSTER_MAX} jugadores
                 </Text>
               </View>
@@ -600,9 +777,9 @@ export function TeamsScreen() {
                 { backgroundColor: ui.statWinBg },
               ]}
             >
-              <Ionicons name="trophy" size={16} color={tokens.primaryGreen} />
-              <Text style={[styles.recordNum, { color: tokens.textPrimary }]}>{w}</Text>
-              <Text style={[styles.recordLabel, { color: tokens.textMuted }]}>
+              <Ionicons name="trophy" size={16} color={ui.primaryAccent} />
+              <Text style={[styles.recordNum, { color: theme.text }]}>{w}</Text>
+              <Text style={[styles.recordLabel, { color: theme.textMuted }]}>
                 VICTORIAS
               </Text>
             </View>
@@ -612,9 +789,9 @@ export function TeamsScreen() {
                 { backgroundColor: ui.statDrawBg },
               ]}
             >
-              <Ionicons name="remove-outline" size={18} color="#CA8A04" />
-              <Text style={[styles.recordNum, { color: tokens.textPrimary }]}>{d}</Text>
-              <Text style={[styles.recordLabel, { color: tokens.textMuted }]}>
+              <Ionicons name="remove-outline" size={18} color={ui.accentOnSurface} />
+              <Text style={[styles.recordNum, { color: theme.text }]}>{d}</Text>
+              <Text style={[styles.recordLabel, { color: theme.textMuted }]}>
                 EMPATES
               </Text>
             </View>
@@ -624,9 +801,9 @@ export function TeamsScreen() {
                 { backgroundColor: ui.statLossBg },
               ]}
             >
-              <Ionicons name="trending-down-outline" size={16} color={tokens.danger} />
-              <Text style={[styles.recordNum, { color: tokens.textPrimary }]}>{l}</Text>
-              <Text style={[styles.recordLabel, { color: tokens.textMuted }]}>
+              <Ionicons name="trending-down-outline" size={16} color={ui.dangerOnSurface} />
+              <Text style={[styles.recordNum, { color: theme.text }]}>{l}</Text>
+              <Text style={[styles.recordLabel, { color: theme.textMuted }]}>
                 DERROTAS
               </Text>
             </View>
@@ -634,9 +811,9 @@ export function TeamsScreen() {
 
           <View style={styles.fogueoBlock}>
             <View style={styles.fogueoTop}>
-              <Ionicons name="flame-outline" size={18} color="#EA580C" />
+              <Ionicons name="flame-outline" size={18} color={theme.accent} />
               <Text
-                style={[styles.fogueoSubtitle, { color: tokens.textMuted, flex: 1 }]}
+                style={[styles.fogueoSubtitle, { color: theme.textMuted, flex: 1 }]}
               >
                 {fogueo.subtitle}
               </Text>
@@ -646,8 +823,7 @@ export function TeamsScreen() {
                 style={[
                   styles.fogueoTrack,
                   {
-                    backgroundColor:
-                      resolved === 'dark' ? 'rgba(255,255,255,0.1)' : '#e5e7eb',
+                    backgroundColor: theme.skeleton,
                   },
                 ]}
               >
@@ -656,13 +832,13 @@ export function TeamsScreen() {
                     styles.fogueoFill,
                     {
                       width: `${Math.round(fogueo.progress * 100)}%`,
-                      backgroundColor: tokens.primaryGreen,
+                      backgroundColor: theme.primary,
                     },
                   ]}
                 />
               </View>
               <Text
-                style={[styles.fogueoTier, { color: tokens.textPrimary }]}
+                style={[styles.fogueoTier, { color: theme.text }]}
                 numberOfLines={1}
               >
                 {fogueo.tierLabel}
@@ -671,7 +847,7 @@ export function TeamsScreen() {
           </View>
 
           {team.description ? (
-            <Text style={[styles.discoverDesc, { color: tokens.textMuted }]}>
+            <Text style={[styles.discoverDesc, { color: theme.textMuted }]}>
               {team.description}
             </Text>
           ) : null}
@@ -683,8 +859,8 @@ export function TeamsScreen() {
               style={[
                 styles.btnJoinOutline,
                 {
-                  borderColor: tokens.borderDark,
-                  backgroundColor: resolved === 'dark' ? 'transparent' : tokens.cardDark,
+                  borderColor: theme.border,
+                  backgroundColor: theme.isDark ? 'transparent' : theme.card,
                 },
                 !canRequestJoin && styles.smallBtnOff,
               ]}
@@ -695,20 +871,15 @@ export function TeamsScreen() {
                 })
               }
             >
-              <Ionicons name="hand-left-outline" size={18} color={tokens.textPrimary} />
-              <Text style={[styles.btnJoinOutlineText, { color: tokens.textPrimary }]}>
+              <Ionicons name="hand-left-outline" size={18} color={theme.text} />
+              <Text style={[styles.btnJoinOutlineText, { color: theme.text }]}>
                 {myJoin ? 'Pendiente' : 'Solicitar unirme'}
               </Text>
             </Pressable>
             <Pressable
               style={[
                 styles.btnChallenge,
-                {
-                  backgroundColor:
-                    resolved === 'dark'
-                      ? 'rgba(248, 113, 113, 0.35)'
-                      : 'rgba(239, 68, 68, 0.2)',
-                },
+                { backgroundColor: ui.dangerSurface },
                 !canChallenge && styles.smallBtnOff,
               ]}
               disabled={!canChallenge}
@@ -721,8 +892,8 @@ export function TeamsScreen() {
                 router.push('/crear')
               }}
             >
-              <Ionicons name="shield-outline" size={18} color={tokens.danger} />
-              <Text style={[styles.btnChallengeText, { color: tokens.danger }]}>
+              <Ionicons name="shield-outline" size={18} color={ui.dangerOnSurface} />
+              <Text style={[styles.btnChallengeText, { color: ui.dangerOnSurface }]}>
                 Desafiar
               </Text>
             </Pressable>
@@ -733,9 +904,9 @@ export function TeamsScreen() {
   }
 
   const renderDiscoverListItem = useCallback(
-    ({ item, index }: ListRenderItemInfo<Team>) =>
-      renderDiscoverTeamCard(item, discoverTab === 'ranking' ? index + 1 : null),
-    [discoverTab, renderDiscoverTeamCard]
+    ({ item }: ListRenderItemInfo<Team>) =>
+      renderDiscoverTeamCard(item, null),
+    [renderDiscoverTeamCard]
   )
 
   const onRivalChallenge = async (c: RivalChallenge, accept: boolean) => {
@@ -758,7 +929,7 @@ export function TeamsScreen() {
 
   if (view === 'create') {
     return (
-      <SafeAreaView style={[styles.safe, { backgroundColor: tokens.bgDark }]} edges={['top']}>
+      <SafeAreaView style={[styles.safe, { backgroundColor: theme.bg }]} edges={['top']}>
         <ScrollView contentContainerStyle={styles.scrollPad}>
           <Pressable onPress={() => setView('list')} style={styles.backRow}>
             <Text style={styles.backLink}>← Volver</Text>
@@ -776,7 +947,7 @@ export function TeamsScreen() {
             value={teamName}
             onChangeText={setTeamName}
             placeholder="Ej: Los Cracks FC"
-            placeholderTextColor="#9ca3af"
+            placeholderTextColor={theme.textMuted}
           />
           <Text style={styles.label}>Nivel</Text>
           <View style={styles.levelGrid}>
@@ -806,7 +977,7 @@ export function TeamsScreen() {
             value={teamDescription}
             onChangeText={setTeamDescription}
             placeholder="Descripción breve"
-            placeholderTextColor="#9ca3af"
+            placeholderTextColor={theme.textMuted}
             multiline
           />
           <Pressable
@@ -823,7 +994,7 @@ export function TeamsScreen() {
 
   if (view === 'invite' && selectedTeam) {
     return (
-      <SafeAreaView style={[styles.safe, { backgroundColor: tokens.bgDark }]} edges={['top']}>
+      <SafeAreaView style={[styles.safe, { backgroundColor: theme.bg }]} edges={['top']}>
         <ScrollView contentContainerStyle={styles.scrollPad}>
           <Pressable onPress={() => setView('detail')} style={styles.backRow}>
             <Text style={styles.backLink}>← Volver</Text>
@@ -835,7 +1006,7 @@ export function TeamsScreen() {
             value={searchQuery}
             onChangeText={setSearchQuery}
             placeholder="Buscar…"
-            placeholderTextColor="#9ca3af"
+            placeholderTextColor={theme.textMuted}
           />
           {availableUsers.map((user) => {
             const alreadyInvited = teamInvites.some(
@@ -884,50 +1055,66 @@ export function TeamsScreen() {
   if (view === 'detail' && detailTeam) {
     const team = detailTeam
     const isCaptain = team.captainId === currentUser.id
-    const viceMember = team.members.find(
-      (m) => m.id !== team.captainId && m.status === 'confirmed'
-    )
+    const viceMember = team.viceCaptainId
+      ? team.members.find(
+          (m) => m.id === team.viceCaptainId && m.status === 'confirmed'
+        ) ?? null
+      : null
     const isMember = isMemberOfTeam(team)
     const myJoin = myPendingJoinForTeam(team.id)
     const incomingJoin = pendingJoinForTeam(team.id)
     const slotsAvailable = TEAM_ROSTER_MAX - team.members.length
+    const roster = rosterCountForDisplay(team)
+    const fogueo = teamRivalFogueo(team)
+    const wins = team.statsWins ?? 0
+    const draws = team.statsDraws ?? 0
+    const losses = team.statsLosses ?? 0
+    const rivalTotal = wins + draws + losses
+    const winStreak = team.statsWinStreak ?? 0
+    const captainMember = team.members.find((m) => m.id === team.captainId)
+    const showCaptainLayout = isCaptain && !teamDetailEditing
+    const ruleLines = parseRulesLines(memberPrivateSettings?.rulesText)
+    const canRequestJoin =
+      !isCaptain &&
+      !isMember &&
+      team.gender === currentUser.gender &&
+      slotsAvailable > 0 &&
+      !myJoin
 
     return (
-      <SafeAreaView style={[styles.safe, { backgroundColor: tokens.bgDark }]} edges={['top']}>
+      <SafeAreaView style={[styles.safe, { backgroundColor: theme.bg }]} edges={['top']}>
         <ScrollView contentContainerStyle={styles.scrollPad}>
-          <Pressable
-            onPress={() => {
-              setTeamDetailEditing(false)
-              setSelectedTeam(null)
-              setView('list')
-            }}
-            style={styles.backRow}
-          >
-            <Text style={styles.backLink}>← Volver</Text>
-          </Pressable>
-
-          <View style={styles.detailHead}>
-            <Pressable onPress={isCaptain ? () => void pickLogo() : undefined}>
-              <View style={styles.detailLogo}>
-                {team.logo ? (
-                  <Image
-                    source={{ uri: team.logo }}
-                    style={styles.detailLogoImg}
-                    contentFit="cover"
-                  />
-                ) : (
-                  <Ionicons name="shield" size={40} color="#2563eb" />
-                )}
-                {isCaptain && savingTeam ? (
-                  <View style={styles.logoOverlay}>
-                    <ActivityIndicator color="#fff" />
+          {isCaptain && teamDetailEditing ? (
+            <>
+              <Pressable onPress={goBackFromDetail} style={styles.backRow}>
+                <Ionicons name="arrow-back" size={18} color={theme.primary} />
+                <Text style={styles.backLink}>Volver</Text>
+              </Pressable>
+              <View
+                style={[
+                  styles.detailHeroCard,
+                  { backgroundColor: theme.card, borderColor: theme.border },
+                ]}
+              >
+                <Pressable onPress={() => void pickLogo()}>
+                  <View style={[styles.detailLogo, { backgroundColor: ui.logoBoxBg }]}>
+                    {team.logo ? (
+                      <Image
+                        source={{ uri: team.logo }}
+                        style={styles.detailLogoImg}
+                        contentFit="cover"
+                      />
+                    ) : (
+                      <Ionicons name="shield" size={44} color={ui.primaryAccent} />
+                    )}
+                    {savingTeam ? (
+                      <View style={styles.logoOverlay}>
+                        <ActivityIndicator color={theme.primaryBtnText} />
+                      </View>
+                    ) : null}
                   </View>
-                ) : null}
-              </View>
-            </Pressable>
-            <View style={{ flex: 1 }}>
-              {isCaptain && teamDetailEditing ? (
-                <>
+                </Pressable>
+                <View style={styles.detailHeroBody}>
                   <TextInput
                     style={styles.input}
                     value={draftTeamName}
@@ -961,46 +1148,741 @@ export function TeamsScreen() {
                       <Text style={styles.outlineBtnSmText}>Cancelar</Text>
                     </Pressable>
                   </View>
-                </>
-              ) : (
-                <>
-                  <View style={styles.detailTitleRow}>
-                    <Text style={styles.h1}>{team.name}</Text>
-                    {isCaptain ? (
-                      <View style={styles.capActions}>
-                        <Pressable onPress={() => setTeamDetailEditing(true)}>
-                          <Text style={styles.link}>Editar</Text>
-                        </Pressable>
-                        <Pressable onPress={confirmDeleteTeam}>
-                          <Text style={styles.dangerLink}>Eliminar</Text>
-                        </Pressable>
+                </View>
+              </View>
+            </>
+          ) : showCaptainLayout ? (
+            <>
+              <View style={styles.captainTopBar}>
+                <Pressable onPress={goBackFromDetail} style={styles.backRow}>
+                  <Ionicons name="arrow-back" size={18} color={theme.primary} />
+                  <Text style={styles.backLink}>Volver</Text>
+                </Pressable>
+                <Pressable
+                  style={[styles.captainDeleteBtn, { backgroundColor: theme.danger }]}
+                  onPress={confirmDeleteTeam}
+                >
+                  <Ionicons name="trash-outline" size={16} color="#fff" />
+                  <Text style={styles.captainDeleteText}>Eliminar</Text>
+                </Pressable>
+              </View>
+
+              <View
+                style={[
+                  styles.captainHeroCard,
+                  { backgroundColor: theme.card, borderColor: theme.border },
+                ]}
+              >
+                <Pressable onPress={() => void pickLogo()}>
+                  <View style={[styles.captainLogoBox, { backgroundColor: ui.logoBoxBg }]}>
+                    {team.logo ? (
+                      <Image
+                        source={{ uri: team.logo }}
+                        style={styles.captainLogoImg}
+                        contentFit="cover"
+                      />
+                    ) : (
+                      <Ionicons name="shield" size={36} color={ui.primaryAccent} />
+                    )}
+                    {savingTeam ? (
+                      <View style={styles.logoOverlay}>
+                        <ActivityIndicator color={theme.primaryBtnText} />
                       </View>
-                    ) : isMember ? (
-                      <Pressable onPress={confirmLeaveTeam}>
-                        <Text style={styles.link}>Salir</Text>
-                      </Pressable>
                     ) : null}
                   </View>
-                  <Text style={styles.sub}>
-                    {LEVEL_LABELS[team.level]} · {team.city}
-                    {isCaptain ? ' · Capitán' : ''}
+                </Pressable>
+                <View style={styles.captainHeroInfo}>
+                  <Text style={[styles.captainHeroName, { color: theme.text }]} numberOfLines={2}>
+                    {team.name}
                   </Text>
+                  <View style={styles.captainPillsRow}>
+                    <View style={[styles.levelPill, { backgroundColor: ui.logoBoxBg }]}>
+                      <Text style={[styles.levelPillText, { color: ui.primaryAccent }]}>
+                        {LEVEL_LABELS[team.level]}
+                      </Text>
+                    </View>
+                    <View
+                      style={[
+                        styles.levelPill,
+                        styles.detailCityPillWrap,
+                        { backgroundColor: theme.skeleton },
+                      ]}
+                    >
+                      <Ionicons name="location-outline" size={12} color={theme.textMuted} />
+                      <Text style={[styles.detailCityPill, { color: theme.textMuted }]}>
+                        {team.city}
+                      </Text>
+                    </View>
+                    <View
+                      style={[
+                        styles.captainBadgePill,
+                        { backgroundColor: theme.isDark ? 'rgba(234,179,8,0.18)' : '#FEF3C7' },
+                      ]}
+                    >
+                      <Ionicons name="ribbon" size={12} color="#CA8A04" />
+                      <Text style={styles.captainBadgePillText}>Capitán</Text>
+                    </View>
+                  </View>
+                  <View style={styles.captainHeroActions}>
+                    {team.logo ? (
+                      <Pressable
+                        onPress={() => void handleRemoveLogo()}
+                        disabled={savingTeam}
+                      >
+                        <Text style={styles.dangerLink}>Quitar escudo</Text>
+                      </Pressable>
+                    ) : null}
+                    <Pressable onPress={() => setTeamDetailEditing(true)}>
+                      <Text style={styles.link}>Editar</Text>
+                    </Pressable>
+                  </View>
+                </View>
+              </View>
+
+              {team.description ? (
+                <View
+                  style={[
+                    styles.captainDescCard,
+                    { backgroundColor: theme.card, borderColor: theme.border },
+                  ]}
+                >
+                  <Text style={[styles.captainDescText, { color: theme.textMuted }]}>
+                    {team.description}
+                  </Text>
+                </View>
+              ) : null}
+
+              <View
+                style={[
+                  styles.detailStatsCard,
+                  { backgroundColor: theme.card, borderColor: theme.border },
+                ]}
+              >
+                <Text style={[styles.detailSectionLabel, { color: theme.textMuted }]}>
+                  ESTADÍSTICAS DEL EQUIPO
+                </Text>
+                <View style={[styles.recordRow, { marginTop: 0 }]}>
+                  <View style={[styles.recordCell, { backgroundColor: ui.statWinBg }]}>
+                    <Ionicons name="trophy" size={18} color={ui.primaryAccent} />
+                    <Text style={[styles.recordNum, { color: theme.text }]}>{wins}</Text>
+                    <Text style={[styles.recordLabel, { color: theme.textMuted }]}>
+                      VICTORIAS
+                    </Text>
+                  </View>
+                  <View style={[styles.recordCell, { backgroundColor: ui.statDrawBg }]}>
+                    <Ionicons name="remove-outline" size={18} color={ui.accentOnSurface} />
+                    <Text style={[styles.recordNum, { color: theme.text }]}>{draws}</Text>
+                    <Text style={[styles.recordLabel, { color: theme.textMuted }]}>
+                      EMPATES
+                    </Text>
+                  </View>
+                  <View style={[styles.recordCell, { backgroundColor: ui.statLossBg }]}>
+                    <Ionicons name="trending-down-outline" size={16} color={ui.dangerOnSurface} />
+                    <Text style={[styles.recordNum, { color: theme.text }]}>{losses}</Text>
+                    <Text style={[styles.recordLabel, { color: theme.textMuted }]}>
+                      DERROTAS
+                    </Text>
+                  </View>
+                </View>
+              </View>
+
+              <View
+                style={[
+                  styles.captainImpulseCard,
+                  { backgroundColor: theme.card, borderColor: theme.border },
+                ]}
+              >
+                <View style={styles.captainImpulseTop}>
+                  <View
+                    style={[
+                      styles.captainImpulseIcon,
+                      { backgroundColor: theme.isDark ? 'rgba(234,179,8,0.2)' : '#FFEDD5' },
+                    ]}
+                  >
+                    <Ionicons name="flame" size={20} color="#EA580C" />
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={[styles.captainImpulseTier, { color: theme.text }]}>
+                      {fogueo.tierLabel}
+                    </Text>
+                    <Text style={[styles.captainImpulseSub, { color: theme.textMuted }]}>
+                      {fogueo.subtitle}
+                    </Text>
+                  </View>
+                </View>
+                <Text style={[styles.captainImpulseLabel, { color: theme.textMuted }]}>
+                  PROGRESO DE IMPULSO
+                </Text>
+                <View style={styles.captainImpulseBarRow}>
+                  <View
+                    style={[styles.fogueoTrack, { backgroundColor: theme.skeleton, flex: 1 }]}
+                  >
+                    <View
+                      style={[
+                        styles.fogueoFill,
+                        {
+                          width: `${Math.round(fogueo.progress * 100)}%`,
+                          backgroundColor: theme.primary,
+                        },
+                      ]}
+                    />
+                  </View>
+                  <Text style={[styles.captainImpulsePct, { color: theme.text }]}>
+                    {Math.round(fogueo.progress * 100)}%
+                  </Text>
+                </View>
+                <View style={styles.captainImpulseStats}>
+                  <View
+                    style={[
+                      styles.captainImpulseStat,
+                      { backgroundColor: theme.skeleton },
+                    ]}
+                  >
+                    <Text style={[styles.captainImpulseStatLabel, { color: theme.textMuted }]}>
+                      Partidos rival jugados
+                    </Text>
+                    <Text style={[styles.captainImpulseStatVal, { color: theme.text }]}>
+                      {rivalTotal}
+                    </Text>
+                  </View>
+                  <View
+                    style={[
+                      styles.captainImpulseStat,
+                      { backgroundColor: theme.skeleton },
+                    ]}
+                  >
+                    <Text style={[styles.captainImpulseStatLabel, { color: theme.textMuted }]}>
+                      Racha de victorias
+                    </Text>
+                    <Text style={[styles.captainImpulseStatVal, { color: theme.text }]}>
+                      {winStreak}
+                    </Text>
+                  </View>
+                </View>
+                <Text style={[styles.captainImpulseFoot, { color: theme.textMuted }]}>
+                  El nivel de impulso se calcula con victorias, empates, derrotas y rachas en
+                  partidos rival.
+                </Text>
+              </View>
+
+              {incomingJoin.length > 0 ? (
+                <View style={[styles.joinBox, { borderColor: theme.border }]}>
+                  <Text style={styles.joinTitle}>
+                    Solicitudes ({incomingJoin.length})
+                  </Text>
+                  {incomingJoin.map((r: TeamJoinRequest) => (
+                    <View key={r.id} style={styles.joinRow}>
+                      <TeamMemberAvatar photo={r.requesterPhoto} name={r.requesterName} />
+                      <Text style={styles.inviteName} numberOfLines={1}>
+                        {r.requesterName}
+                      </Text>
+                      <Pressable
+                        style={styles.outlineBtnSm}
+                        onPress={() =>
+                          void respondToJoinRequest(r.id, false).then((res) => {
+                            if (!res.ok && res.error) Alert.alert('Error', res.error)
+                          })
+                        }
+                      >
+                        <Text style={styles.outlineBtnSmText}>No</Text>
+                      </Pressable>
+                      <Pressable
+                        style={styles.primaryBtnSm}
+                        onPress={() =>
+                          void respondToJoinRequest(r.id, true).then((res) => {
+                            if (!res.ok && res.error) Alert.alert('Error', res.error)
+                          })
+                        }
+                      >
+                        <Text style={styles.primaryBtnText}>Sí</Text>
+                      </Pressable>
+                    </View>
+                  ))}
+                </View>
+              ) : null}
+
+              <View
+                style={[
+                  styles.captainSectionCard,
+                  { backgroundColor: theme.card, borderColor: theme.border },
+                ]}
+              >
+                <Text style={[styles.captainSectionTitle, { color: theme.text }]}>
+                  Vicecapitán
+                </Text>
+                <Pressable
+                  style={[
+                    styles.captainVicePicker,
+                    { borderColor: theme.border, backgroundColor: theme.bg },
+                  ]}
+                  onPress={() => pickViceCaptain(team)}
+                >
+                  {viceMember ? (
+                    <TeamMemberAvatar photo={viceMember.photo} name={viceMember.name} size={36} />
+                  ) : (
+                    <View
+                      style={[
+                        styles.captainVicePlaceholder,
+                        { backgroundColor: theme.skeleton },
+                      ]}
+                    >
+                      <Ionicons name="person-add-outline" size={18} color={theme.textMuted} />
+                    </View>
+                  )}
+                  <Text
+                    style={[styles.captainViceName, { color: theme.text }]}
+                    numberOfLines={1}
+                  >
+                    {viceMember?.name ?? 'Designar vicecapitán'}
+                  </Text>
+                  <Ionicons name="chevron-down" size={18} color={theme.textMuted} />
+                </Pressable>
+              </View>
+
+              {loadingPrivateSettings ? (
+                <ActivityIndicator style={{ marginVertical: 12 }} />
+              ) : editingCoord ? (
+                <View
+                  style={[
+                    styles.captainSectionCard,
+                    { backgroundColor: theme.card, borderColor: theme.border },
+                  ]}
+                >
+                  <Text style={[styles.captainSectionTitle, { color: theme.text }]}>
+                    Grupo de WhatsApp
+                  </Text>
+                  <Text style={styles.label}>Enlace del grupo</Text>
+                  <TextInput
+                    style={styles.input}
+                    value={draftWhatsapp}
+                    onChangeText={setDraftWhatsapp}
+                    placeholder="https://chat.whatsapp.com/..."
+                    autoCapitalize="none"
+                  />
+                  <Text style={[styles.label, { marginTop: 12 }]}>Reglas del equipo</Text>
+                  <TextInput
+                    style={[styles.input, styles.inputMultiline]}
+                    value={draftRules}
+                    onChangeText={setDraftRules}
+                    multiline
+                    maxLength={4000}
+                    placeholder="Una regla por línea"
+                  />
+                  <View style={styles.rowActions}>
+                    <Pressable
+                      style={styles.outlineBtnSm}
+                      onPress={() => {
+                        setDraftWhatsapp(memberPrivateSettings?.whatsappInviteUrl ?? '')
+                        setDraftRules(memberPrivateSettings?.rulesText ?? '')
+                        setEditingCoord(false)
+                      }}
+                    >
+                      <Text style={styles.outlineBtnSmText}>Cancelar</Text>
+                    </Pressable>
+                    <Pressable
+                      style={styles.primaryBtnSm}
+                      disabled={savingCoord}
+                      onPress={() => void (async () => {
+                        setSavingCoord(true)
+                        try {
+                          const res = await updateTeamPrivateSettings(team.id, {
+                            whatsappInviteUrl: draftWhatsapp,
+                            rulesText: draftRules,
+                          })
+                          if (res) setMemberPrivateSettings(res)
+                          setEditingCoord(false)
+                        } finally {
+                          setSavingCoord(false)
+                        }
+                      })()}
+                    >
+                      <Text style={styles.primaryBtnText}>Guardar</Text>
+                    </Pressable>
+                  </View>
+                </View>
+              ) : (
+                <View
+                  style={[
+                    styles.captainWaCard,
+                    { backgroundColor: theme.card, borderColor: theme.border },
+                  ]}
+                >
+                  <View style={styles.captainWaHead}>
+                    <View style={styles.captainWaIconWrap}>
+                      <Ionicons name="logo-whatsapp" size={24} color="#25D366" />
+                    </View>
+                    <View style={{ flex: 1 }}>
+                      <Text style={[styles.captainWaTitle, { color: theme.text }]}>
+                        Grupo de WhatsApp
+                      </Text>
+                      <Text style={[styles.captainWaSub, { color: theme.textMuted }]}>
+                        Coordinación y avisos entre jugadores
+                      </Text>
+                    </View>
+                  </View>
+                  <View style={styles.captainWaActions}>
+                    {memberPrivateSettings?.whatsappInviteUrl ? (
+                      <Pressable
+                        style={styles.captainWaJoinBtn}
+                        onPress={() =>
+                          void Linking.openURL(memberPrivateSettings.whatsappInviteUrl!)
+                        }
+                      >
+                        <Text style={styles.captainWaJoinText}>Unirse al grupo</Text>
+                      </Pressable>
+                    ) : null}
+                    <Pressable
+                      style={[
+                        styles.captainWaEditBtn,
+                        { borderColor: theme.border },
+                      ]}
+                      onPress={openCoordEditor}
+                    >
+                      <Text style={[styles.captainWaEditText, { color: theme.text }]}>
+                        Editar enlace y reglas
+                      </Text>
+                    </Pressable>
+                  </View>
+                </View>
+              )}
+
+              {!editingCoord && ruleLines.length > 0 ? (
+                <TeamRulesList
+                  rules={ruleLines}
+                  theme={theme}
+                  ui={ui}
+                  styles={styles}
+                />
+              ) : null}
+
+              <View style={styles.captainMetricsRow}>
+                <View
+                  style={[
+                    styles.captainMetricCard,
+                    { backgroundColor: theme.card, borderColor: theme.border },
+                  ]}
+                >
+                  <Text style={[styles.captainMetricNum, { color: theme.primary }]}>
+                    {roster}
+                  </Text>
+                  <Text style={[styles.captainMetricLabel, { color: theme.textMuted }]}>
+                    JUGADORES
+                  </Text>
+                </View>
+                <View
+                  style={[
+                    styles.captainMetricCard,
+                    { backgroundColor: theme.card, borderColor: theme.border },
+                  ]}
+                >
+                  <Text
+                    style={[
+                      styles.captainMetricNum,
+                      { color: slotsAvailable > 0 ? '#EA580C' : theme.textMuted },
+                    ]}
+                  >
+                    {slotsAvailable}
+                  </Text>
+                  <Text style={[styles.captainMetricLabel, { color: theme.textMuted }]}>
+                    CUPOS
+                  </Text>
+                </View>
+              </View>
+
+              <View style={styles.captainPlantillaHead}>
+                <Text style={[styles.sectionTitle, { color: theme.text, marginBottom: 0 }]}>
+                  Plantilla
+                </Text>
+                <Pressable
+                  style={[styles.captainInvitePill, { backgroundColor: theme.primary }]}
+                  onPress={() => setView('invite')}
+                >
+                  <Ionicons name="person-add-outline" size={16} color={theme.primaryBtnText} />
+                  <Text style={styles.captainInvitePillText}>Invitar</Text>
+                </Pressable>
+              </View>
+
+              {team.members.map((member) => {
+                const isCap = team.captainId === member.id
+                const isVice = viceMember?.id === member.id
+                const isActive = member.status === 'confirmed'
+                return (
+                  <View
+                    key={member.id}
+                    style={[
+                      styles.captainMemberRow,
+                      { backgroundColor: theme.card, borderColor: theme.border },
+                    ]}
+                  >
+                    <TeamMemberAvatar photo={member.photo} name={member.name} />
+                    <View style={styles.detailMemberBody}>
+                      <View style={styles.captainMemberNameRow}>
+                        <Text style={[styles.inviteName, { color: theme.text }]}>
+                          {member.name}
+                        </Text>
+                        {isCap ? (
+                          <View
+                            style={[
+                              styles.captainRoleBadge,
+                              { backgroundColor: theme.isDark ? 'rgba(234,179,8,0.18)' : '#FEF3C7' },
+                            ]}
+                          >
+                            <Text style={styles.captainRoleBadgeText}>Capitán</Text>
+                          </View>
+                        ) : isVice ? (
+                          <View
+                            style={[
+                              styles.captainRoleBadge,
+                              { backgroundColor: ui.logoBoxBg },
+                            ]}
+                          >
+                            <Text
+                              style={[styles.captainRoleBadgeText, { color: theme.primary }]}
+                            >
+                              2º cap.
+                            </Text>
+                          </View>
+                        ) : null}
+                      </View>
+                      <Text style={[styles.inviteMeta, { color: theme.textMuted }]}>
+                        {positionLabel(member.position)}
+                      </Text>
+                    </View>
+                    {isActive ? (
+                      <View style={styles.captainActiveWrap}>
+                        <View style={[styles.captainActiveDot, { backgroundColor: theme.primary }]} />
+                        <Text style={[styles.captainActiveText, { color: theme.primary }]}>
+                          Activo
+                        </Text>
+                      </View>
+                    ) : (
+                      <Text style={[styles.captainPendingText, { color: theme.accent }]}>
+                        Pendiente
+                      </Text>
+                    )}
+                  </View>
+                )
+              })}
+
+              {slotsAvailable > 0 ? (
+                <View
+                  style={[
+                    styles.emptySlotsCard,
+                    { backgroundColor: theme.card, borderColor: theme.border },
+                  ]}
+                >
+                  <View style={styles.emptySlotsHeader}>
+                    <View
+                      style={[
+                        styles.emptySlotsIcon,
+                        { backgroundColor: theme.skeleton },
+                      ]}
+                    >
+                      <Ionicons name="people-outline" size={22} color={theme.textMuted} />
+                    </View>
+                    <View style={{ flex: 1 }}>
+                      <Text style={[styles.emptySlotsTitle, { color: theme.text }]}>
+                        {slotsAvailable}{' '}
+                        {slotsAvailable === 1 ? 'cupo disponible' : 'cupos disponibles'}
+                      </Text>
+                      <Text style={[styles.emptySlotsSub, { color: theme.textMuted }]}>
+                        Invita compañeros para completar la plantilla
+                      </Text>
+                    </View>
+                  </View>
+                  <View style={styles.emptySlotsActions}>
+                    <Pressable
+                      style={[styles.emptySlotAction, { borderColor: theme.border }]}
+                      onPress={() => setView('invite')}
+                    >
+                      <Ionicons name="person-add" size={16} color={theme.primary} />
+                      <Text style={[styles.emptySlotActionText, { color: theme.primary }]}>
+                        Invitar
+                      </Text>
+                    </Pressable>
+                    <Pressable
+                      style={[styles.emptySlotAction, { borderColor: theme.border }]}
+                      onPress={() => void shareInviteLink(team)}
+                    >
+                      <Ionicons name="share-outline" size={16} color={theme.text} />
+                      <Text style={[styles.emptySlotActionText, { color: theme.text }]}>
+                        Compartir
+                      </Text>
+                    </Pressable>
+                    <Pressable
+                      style={[styles.emptySlotAction, { borderColor: theme.border }]}
+                      onPress={() => whatsappInvite(team)}
+                    >
+                      <Ionicons name="logo-whatsapp" size={16} color="#25D366" />
+                      <Text style={[styles.emptySlotActionText, { color: theme.text }]}>
+                        WhatsApp
+                      </Text>
+                    </Pressable>
+                  </View>
+                </View>
+              ) : null}
+            </>
+          ) : (
+            <>
+          <Pressable
+            onPress={goBackFromDetail}
+            style={styles.backRow}
+          >
+            <Ionicons name="arrow-back" size={18} color={theme.primary} />
+            <Text style={styles.backLink}>Volver</Text>
+          </Pressable>
+
+          {/* Hero */}
+          <View
+            style={[
+              styles.detailHeroCard,
+              { backgroundColor: theme.card, borderColor: theme.border },
+            ]}
+          >
+            <Pressable onPress={isCaptain ? () => void pickLogo() : undefined}>
+              <View style={[styles.detailLogo, { backgroundColor: ui.logoBoxBg }]}>
+                {team.logo ? (
+                  <Image
+                    source={{ uri: team.logo }}
+                    style={styles.detailLogoImg}
+                    contentFit="cover"
+                  />
+                ) : (
+                  <Ionicons name="shield" size={44} color={ui.primaryAccent} />
+                )}
+                {isCaptain && savingTeam ? (
+                  <View style={styles.logoOverlay}>
+                    <ActivityIndicator color={theme.primaryBtnText} />
+                  </View>
+                ) : null}
+              </View>
+            </Pressable>
+
+            <View style={styles.detailHeroBody}>
+                <Text style={styles.detailHeroName} numberOfLines={2}>
+                  {team.name}
+                </Text>
+                <View style={styles.detailHeroPills}>
+                  <View style={[styles.levelPill, { backgroundColor: ui.logoBoxBg }]}>
+                    <Text style={[styles.levelPillText, { color: ui.primaryAccent }]}>
+                      {LEVEL_LABELS[team.level]}
+                    </Text>
+                  </View>
+                  <View
+                    style={[
+                      styles.levelPill,
+                      styles.detailCityPillWrap,
+                      { backgroundColor: theme.skeleton },
+                    ]}
+                  >
+                    <Ionicons name="location-outline" size={12} color={theme.textMuted} />
+                    <Text style={[styles.detailCityPill, { color: theme.textMuted }]}>
+                      {team.city}
+                    </Text>
+                  </View>
+                </View>
+                <Text style={[styles.detailRosterHint, { color: theme.textMuted }]}>
+                  {roster}/{TEAM_ROSTER_MAX} jugadores · {slotsAvailable} cupos libres
+                </Text>
+                <View style={styles.detailTitleRow}>
+                  {isCaptain ? (
+                    <View style={styles.capActions}>
+                      <Pressable onPress={() => setTeamDetailEditing(true)}>
+                        <Text style={styles.link}>Editar</Text>
+                      </Pressable>
+                      <Pressable onPress={confirmDeleteTeam}>
+                        <Text style={styles.dangerLink}>Eliminar</Text>
+                      </Pressable>
+                    </View>
+                  ) : isMember ? (
+                    <Pressable onPress={confirmLeaveTeam}>
+                      <Text style={styles.link}>Salir del equipo</Text>
+                    </Pressable>
+                  ) : null}
                   {isCaptain && team.logo ? (
                     <Pressable onPress={() => void handleRemoveLogo()} disabled={savingTeam}>
                       <Text style={styles.dangerLink}>Quitar escudo</Text>
                     </Pressable>
                   ) : null}
-                </>
-              )}
-            </View>
+                </View>
+              </View>
           </View>
 
           {!teamDetailEditing && team.description ? (
-            <Text style={styles.bodyText}>{team.description}</Text>
+            <Text style={[styles.detailDescription, { color: theme.textMuted }]}>
+              {team.description}
+            </Text>
+          ) : null}
+
+          {!teamDetailEditing ? (
+            <View
+              style={[
+                styles.detailStatsCard,
+                { backgroundColor: theme.card, borderColor: theme.border },
+              ]}
+            >
+              <Text style={[styles.detailSectionLabel, { color: theme.textMuted }]}>
+                ESTADÍSTICAS DEL EQUIPO
+              </Text>
+              <View style={[styles.recordRow, { marginTop: 0 }]}>
+                <View style={[styles.recordCell, { backgroundColor: ui.statWinBg }]}>
+                  <Ionicons name="trophy" size={18} color={theme.primary} />
+                  <Text style={[styles.recordNum, { color: theme.text }]}>{wins}</Text>
+                  <Text style={[styles.recordLabel, { color: theme.textMuted }]}>
+                    VICTORIAS
+                  </Text>
+                </View>
+                <View style={[styles.recordCell, { backgroundColor: ui.statDrawBg }]}>
+                  <Ionicons name="remove-outline" size={18} color={ui.accentOnSurface} />
+                  <Text style={[styles.recordNum, { color: theme.text }]}>{draws}</Text>
+                  <Text style={[styles.recordLabel, { color: theme.textMuted }]}>
+                    EMPATES
+                  </Text>
+                </View>
+                <View style={[styles.recordCell, { backgroundColor: ui.statLossBg }]}>
+                  <Ionicons name="trending-down-outline" size={16} color={ui.dangerOnSurface} />
+                  <Text style={[styles.recordNum, { color: theme.text }]}>{losses}</Text>
+                  <Text style={[styles.recordLabel, { color: theme.textMuted }]}>
+                    DERROTAS
+                  </Text>
+                </View>
+              </View>
+              <View style={styles.fogueoBlock}>
+                <View style={styles.fogueoTop}>
+                  <Ionicons name="flame-outline" size={18} color={theme.accent} />
+                  <Text
+                    style={[styles.fogueoSubtitle, { color: theme.textMuted, flex: 1 }]}
+                  >
+                    {fogueo.subtitle}
+                  </Text>
+                </View>
+                <View style={styles.fogueoBarRow}>
+                  <View
+                    style={[styles.fogueoTrack, { backgroundColor: theme.skeleton }]}
+                  >
+                    <View
+                      style={[
+                        styles.fogueoFill,
+                        {
+                          width: `${Math.round(fogueo.progress * 100)}%`,
+                          backgroundColor: theme.primary,
+                        },
+                      ]}
+                    />
+                  </View>
+                  <Text
+                    style={[styles.fogueoTier, { color: theme.text }]}
+                    numberOfLines={1}
+                  >
+                    {fogueo.tierLabel}
+                  </Text>
+                </View>
+              </View>
+            </View>
           ) : null}
 
           {isCaptain && incomingJoin.length > 0 && !teamDetailEditing ? (
-            <View style={styles.joinBox}>
+            <View style={[styles.joinBox, { borderColor: theme.border }]}>
               <Text style={styles.joinTitle}>
                 Solicitudes ({incomingJoin.length})
               </Text>
@@ -1039,12 +1921,20 @@ export function TeamsScreen() {
             </View>
           ) : null}
 
-          {!isCaptain && !isMember && team.gender === currentUser.gender ? (
-            <View style={styles.joinBox}>
+          {!teamDetailEditing && !isCaptain && !isMember && team.gender === currentUser.gender ? (
+            <View
+              style={[
+                styles.detailJoinBanner,
+                { backgroundColor: theme.card, borderColor: theme.border },
+              ]}
+            >
+              <Text style={[styles.detailJoinBannerText, { color: theme.text }]}>
+                ¿Quieres formar parte de este equipo?
+              </Text>
               {slotsAvailable === 0 ? (
-                <Text style={styles.muted}>Plantilla completa.</Text>
+                <Text style={[styles.muted, { marginTop: 8 }]}>Plantilla completa.</Text>
               ) : myJoin ? (
-                <View style={styles.joinRow}>
+                <View style={[styles.joinRow, { marginTop: 10 }]}>
                   <Text style={styles.bodyText}>Solicitud pendiente.</Text>
                   <Pressable
                     style={styles.outlineBtnSm}
@@ -1059,14 +1949,20 @@ export function TeamsScreen() {
                 </View>
               ) : (
                 <Pressable
-                  style={styles.primaryBtn}
+                  style={[
+                    styles.detailJoinBtn,
+                    { backgroundColor: theme.primary },
+                    !canRequestJoin && styles.smallBtnOff,
+                  ]}
+                  disabled={!canRequestJoin}
                   onPress={() =>
                     void requestToJoinTeam(team.id).then((res) => {
                       if (!res.ok && res.error) Alert.alert('Solicitud', res.error)
                     })
                   }
                 >
-                  <Text style={styles.primaryBtnText}>Solicitar unirme</Text>
+                  <Ionicons name="person-add-outline" size={18} color={theme.primaryBtnText} />
+                  <Text style={styles.primaryBtnText}>Solicitar unirse</Text>
                 </Pressable>
               )}
             </View>
@@ -1153,106 +2049,226 @@ export function TeamsScreen() {
                       <Text style={styles.link}>Editar enlace y reglas</Text>
                     </Pressable>
                   ) : null}
-                  {memberPrivateSettings?.rulesText ? (
-                    <View style={styles.rulesBox}>
-                      <Text style={styles.rulesTitle}>Reglas</Text>
-                      <Text style={styles.rulesBody}>
-                        {memberPrivateSettings.rulesText}
-                      </Text>
-                    </View>
-                  ) : null}
                 </>
               )}
             </View>
           ) : null}
 
-          <View style={styles.statsRow}>
-            <View style={styles.statBox}>
-              <Text style={styles.statNum}>{team.members.length}</Text>
-              <Text style={styles.statLabel}>Jugadores</Text>
-            </View>
-            <View style={styles.statBox}>
-              <Text style={styles.statNum}>{slotsAvailable}</Text>
-              <Text style={styles.statLabel}>Cupos</Text>
-            </View>
-          </View>
-          <View style={styles.roleRow}>
-            <Text style={styles.roleText}>Capitán: {team.members.find((m) => m.id === team.captainId)?.name || 'Sin dato'}</Text>
-            <Text style={styles.roleText}>
-              Vice: {viceMember?.name || 'Por definir'}
-            </Text>
-          </View>
-
-          <Text style={styles.sectionTitle}>Plantilla</Text>
-          {isCaptain && slotsAvailable > 0 ? (
-            <Pressable
-              style={[styles.primaryBtn, { marginBottom: 12 }]}
-              onPress={() => setView('invite')}
-            >
-              <Text style={styles.primaryBtnText}>Invitar jugadores</Text>
-            </Pressable>
+          {!teamDetailEditing && isMember && !showCaptainLayout && ruleLines.length > 0 ? (
+            <TeamRulesList
+              rules={ruleLines}
+              theme={theme}
+              ui={ui}
+              styles={styles}
+            />
           ) : null}
 
-          {team.members.map((member) => (
-            <View key={member.id} style={styles.memberRow}>
-              <Image
-                source={{ uri: member.photo }}
-                style={styles.avatar}
-                contentFit="cover"
-              />
-              <View style={{ flex: 1 }}>
-                <View style={styles.cardTitleRow}>
-                  <Text style={styles.inviteName}>{member.name}</Text>
-                  {team.captainId === member.id ? (
-                    <Ionicons name="ribbon" size={14} color="#d97706" />
-                  ) : viceMember?.id === member.id ? (
-                    <Ionicons name="shield-checkmark" size={14} color="#2563eb" />
-                  ) : null}
+          {!teamDetailEditing ? (
+            <>
+              <View style={styles.detailLeadershipRow}>
+                <View
+                  style={[
+                    styles.detailLeadCard,
+                    { backgroundColor: theme.card, borderColor: theme.border },
+                  ]}
+                >
+                  <Ionicons name="ribbon-outline" size={16} color={theme.accent} />
+                  <View style={{ flex: 1 }}>
+                    <Text style={[styles.detailLeadLabel, { color: theme.textMuted }]}>
+                      Capitán
+                    </Text>
+                    <Text style={[styles.detailLeadName, { color: theme.text }]}>
+                      {captainMember?.name ?? 'Sin dato'}
+                    </Text>
+                  </View>
                 </View>
-                <Text style={styles.inviteMeta}>
-                  {positionLabel(member.position)} ·{' '}
-                  {team.captainId === member.id
-                    ? 'Capitán'
-                    : viceMember?.id === member.id
-                      ? 'Vice'
-                      : member.status === 'confirmed'
-                        ? 'Activo'
-                        : 'Pendiente'}
+                <View
+                  style={[
+                    styles.detailLeadCard,
+                    { backgroundColor: theme.card, borderColor: theme.border },
+                  ]}
+                >
+                  <Ionicons name="shield-checkmark-outline" size={16} color={ui.primaryAccent} />
+                  <View style={{ flex: 1 }}>
+                    <Text style={[styles.detailLeadLabel, { color: theme.textMuted }]}>
+                      Vice
+                    </Text>
+                    <Text style={[styles.detailLeadName, { color: theme.text }]}>
+                      {viceMember?.name ?? 'Por definir'}
+                    </Text>
+                  </View>
+                </View>
+              </View>
+
+              <View style={styles.detailPlantillaHead}>
+                <Text style={[styles.sectionTitle, { color: theme.text, marginBottom: 0 }]}>
+                  Plantilla
+                </Text>
+                <Text style={[styles.detailPlantillaCount, { color: theme.textMuted }]}>
+                  {roster} activos
                 </Text>
               </View>
-            </View>
-          ))}
 
-          {Array.from({ length: slotsAvailable }).map((_, i) => (
-            <View key={`slot-${i}`} style={styles.slotRow}>
-              <Ionicons name="person-outline" size={24} color="#9ca3af" />
-              <Text style={styles.muted}>Cupo disponible</Text>
-              {isCaptain ? (
-                <View style={styles.slotActions}>
-                  <Pressable onPress={() => void shareInviteLink(team)}>
-                    <Text style={styles.link}>Compartir</Text>
-                  </Pressable>
-                  <Pressable onPress={() => whatsappInvite(team)}>
-                    <Text style={styles.link}>WhatsApp</Text>
-                  </Pressable>
-                </View>
+              {isCaptain && slotsAvailable > 0 ? (
+                <Pressable
+                  style={[styles.detailInviteBtn, { borderColor: theme.primary }]}
+                  onPress={() => setView('invite')}
+                >
+                  <Ionicons name="person-add-outline" size={18} color={theme.primary} />
+                  <Text style={[styles.detailInviteBtnText, { color: theme.primary }]}>
+                    Invitar jugadores
+                  </Text>
+                </Pressable>
               ) : null}
-            </View>
-          ))}
+
+              {team.members.map((member) => {
+                const isCap = team.captainId === member.id
+                const isVice = viceMember?.id === member.id
+                const roleLabel = isCap
+                  ? 'Capitán'
+                  : isVice
+                    ? 'Vice'
+                    : member.status === 'confirmed'
+                      ? 'Activo'
+                      : 'Pendiente'
+                const statusTone =
+                  member.status === 'confirmed'
+                    ? theme.primary
+                    : theme.accent
+                return (
+                  <View
+                    key={member.id}
+                    style={[
+                      styles.detailMemberCard,
+                      { backgroundColor: theme.card, borderColor: theme.border },
+                    ]}
+                  >
+                    <Image
+                      source={{ uri: member.photo }}
+                      style={styles.avatar}
+                      contentFit="cover"
+                    />
+                    <View style={styles.detailMemberBody}>
+                      <Text style={[styles.inviteName, { color: theme.text }]}>
+                        {member.name}
+                      </Text>
+                      <Text style={[styles.inviteMeta, { color: theme.textMuted }]}>
+                        {positionLabel(member.position)}
+                        {isCap || isVice ? ` · ${roleLabel}` : ''}
+                      </Text>
+                    </View>
+                    <View
+                      style={[
+                        styles.detailStatusPill,
+                        {
+                          backgroundColor:
+                            member.status === 'confirmed'
+                              ? ui.statWinBg
+                              : ui.statDrawBg,
+                        },
+                      ]}
+                    >
+                      <Text
+                        style={[
+                          styles.detailStatusPillText,
+                          { color: statusTone },
+                        ]}
+                      >
+                        {roleLabel}
+                      </Text>
+                    </View>
+                  </View>
+                )
+              })}
+
+              {slotsAvailable > 0 ? (
+                <View
+                  style={[
+                    styles.emptySlotsCard,
+                    { backgroundColor: theme.card, borderColor: theme.border },
+                  ]}
+                >
+                  <View style={styles.emptySlotsHeader}>
+                    <View
+                      style={[
+                        styles.emptySlotsIcon,
+                        { backgroundColor: theme.skeleton },
+                      ]}
+                    >
+                      <Ionicons name="people-outline" size={22} color={theme.textMuted} />
+                    </View>
+                    <View style={{ flex: 1 }}>
+                      <Text style={[styles.emptySlotsTitle, { color: theme.text }]}>
+                        {slotsAvailable}{' '}
+                        {slotsAvailable === 1 ? 'cupo disponible' : 'cupos disponibles'}
+                      </Text>
+                      <Text style={[styles.emptySlotsSub, { color: theme.textMuted }]}>
+                        Invita compañeros para completar la plantilla
+                      </Text>
+                    </View>
+                  </View>
+                  {isCaptain ? (
+                    <View style={styles.emptySlotsActions}>
+                      <Pressable
+                        style={[styles.emptySlotAction, { borderColor: theme.border }]}
+                        onPress={() => setView('invite')}
+                      >
+                        <Ionicons name="person-add" size={16} color={theme.primary} />
+                        <Text style={[styles.emptySlotActionText, { color: theme.primary }]}>
+                          Invitar
+                        </Text>
+                      </Pressable>
+                      <Pressable
+                        style={[styles.emptySlotAction, { borderColor: theme.border }]}
+                        onPress={() => void shareInviteLink(team)}
+                      >
+                        <Ionicons name="share-outline" size={16} color={theme.text} />
+                        <Text style={[styles.emptySlotActionText, { color: theme.text }]}>
+                          Compartir
+                        </Text>
+                      </Pressable>
+                      <Pressable
+                        style={[styles.emptySlotAction, { borderColor: theme.border }]}
+                        onPress={() => whatsappInvite(team)}
+                      >
+                        <Ionicons name="logo-whatsapp" size={16} color="#25D366" />
+                        <Text style={[styles.emptySlotActionText, { color: theme.text }]}>
+                          WhatsApp
+                        </Text>
+                      </Pressable>
+                    </View>
+                  ) : null}
+                </View>
+              ) : (
+                <View
+                  style={[
+                    styles.emptySlotsCard,
+                    { backgroundColor: theme.card, borderColor: theme.border },
+                  ]}
+                >
+                  <Text style={[styles.emptySlotsSub, { color: theme.textMuted }]}>
+                    Plantilla completa ({TEAM_ROSTER_MAX}/{TEAM_ROSTER_MAX})
+                  </Text>
+                </View>
+              )}
+            </>
+          ) : null}
+            </>
+          )}
         </ScrollView>
       </SafeAreaView>
     )
   }
 
   return (
-    <SafeAreaView style={[styles.safe, { backgroundColor: tokens.bgDark }]} edges={['top']}>
+    <SafeAreaView style={[styles.safe, { backgroundColor: theme.bg }]} edges={['top']}>
       <View
         style={[
           styles.header,
-          { backgroundColor: tokens.cardDark, borderBottomColor: tokens.borderDark },
+          { backgroundColor: theme.card, borderBottomColor: theme.border },
         ]}
       >
-        <Text style={[styles.headerTitle, { color: tokens.textPrimary }]}>Equipos</Text>
+        <Text style={[styles.headerTitle, { color: theme.text }]}>Equipos</Text>
       </View>
       <ScrollView contentContainerStyle={styles.scrollPad}>
         {pendingInvites.length > 0 ? (
@@ -1410,13 +2426,13 @@ export function TeamsScreen() {
 
         <View style={styles.block}>
           <View style={styles.blockHead}>
-            <Text style={[styles.blockTitle, { color: tokens.textPrimary }]}>
+            <Text style={[styles.blockTitle, { color: theme.text }]}>
               Mis equipos
             </Text>
             <Pressable
               style={[
                 styles.createPill,
-                { backgroundColor: tokens.primaryGreen },
+                { backgroundColor: theme.primary },
                 isTeamLimitReached && styles.btnDisabled,
               ]}
               disabled={isTeamLimitReached}
@@ -1425,7 +2441,7 @@ export function TeamsScreen() {
               <Text style={styles.createPillText}>+ Crear</Text>
             </Pressable>
           </View>
-          <Text style={[styles.hint, { color: tokens.textMuted }]}>
+          <Text style={[styles.hint, { color: theme.textMuted }]}>
             Puedes ser parte de hasta {TEAM_USER_MAX_MEMBERSHIPS} equipos en total
             (incluye los que creas y a los que te unes).
           </Text>
@@ -1436,17 +2452,17 @@ export function TeamsScreen() {
               style={[
                 styles.emptyBox,
                 {
-                  backgroundColor: tokens.cardDark,
-                  borderColor: tokens.borderDark,
+                  backgroundColor: theme.card,
+                  borderColor: theme.border,
                 },
               ]}
             >
-              <Ionicons name="people-outline" size={42} color={tokens.textMuted} />
-              <Text style={[styles.emptyTitle, { color: tokens.textPrimary }]}>
+              <Ionicons name="people-outline" size={42} color={theme.textMuted} />
+              <Text style={[styles.emptyTitle, { color: theme.text }]}>
                 No tienes equipos aún
               </Text>
               <Pressable onPress={() => setView('create')}>
-                <Text style={[styles.emptyLink, { color: tokens.primaryGreen }]}>
+                <Text style={[styles.emptyLink, { color: theme.primary }]}>
                   Crear tu primer equipo
                 </Text>
               </Pressable>
@@ -1454,75 +2470,17 @@ export function TeamsScreen() {
           )}
         </View>
 
-        <View
-          style={[
-            styles.tabsWrap,
-            {
-              backgroundColor: ui.tabInactiveBg,
-              borderColor: tokens.borderDark,
-            },
-          ]}
-        >
-          <Pressable
-            onPress={() => setDiscoverTab('region')}
-            style={[
-              styles.tabBtn,
-              discoverTab === 'region' && {
-                backgroundColor: tokens.cardDark,
-              },
-            ]}
-          >
-            <Ionicons
-              name="people-outline"
-              size={16}
-              color={discoverTab === 'region' ? tokens.textPrimary : tokens.textMuted}
-            />
-            <Text
-              style={[
-                styles.tabBtnText,
-                { color: discoverTab === 'region' ? tokens.textPrimary : tokens.textMuted },
-              ]}
-            >
-              Región
-            </Text>
-          </Pressable>
-          <Pressable
-            onPress={() => setDiscoverTab('ranking')}
-            style={[
-              styles.tabBtn,
-              discoverTab === 'ranking' && {
-                backgroundColor: tokens.cardDark,
-              },
-            ]}
-          >
-            <Ionicons
-              name="trophy-outline"
-              size={16}
-              color={discoverTab === 'ranking' ? tokens.accent : tokens.textMuted}
-            />
-            <Text
-              style={[
-                styles.tabBtnText,
-                { color: discoverTab === 'ranking' ? tokens.accent : tokens.textMuted },
-              ]}
-            >
-              Ranking
-            </Text>
-          </Pressable>
-        </View>
-
         <View style={styles.block}>
-          <Text style={[styles.blockTitle, { color: tokens.textPrimary }]}>
-            {discoverTab === 'region' ? 'Equipos en tu región' : 'Ranking rival'}
+          <Text style={[styles.blockTitle, { color: theme.text }]}>
+            Equipos en tu región
           </Text>
-          <Text style={[styles.hint, { color: tokens.textMuted }]}>
-            {discoverTab === 'region'
-              ? 'Descubre planteles cerca tuyo: lee la descripción, mira el fogueo y pide unirte o manda un desafío.'
-              : 'Mismos equipos elegibles, ordenados por rendimiento rival: más V, luego más E y menos D.'}
+          <Text style={[styles.hint, { color: theme.textMuted }]}>
+            Descubre planteles cerca tuyo: lee la descripción, mira el fogueo y pide
+            unirte o manda un desafío.
           </Text>
           {discoverList.length > 0 ? (
             <View style={styles.discoverListWrap}>
-              <FlashList
+              <FlatList
                 data={discoverList}
                 keyExtractor={(item) => item.id}
                 renderItem={renderDiscoverListItem}
@@ -1531,7 +2489,7 @@ export function TeamsScreen() {
               />
             </View>
           ) : (
-            <Text style={[styles.muted, { color: tokens.textMuted }]}>
+            <Text style={[styles.muted, { color: theme.textMuted }]}>
               No hay equipos disponibles con tus filtros de ubicación y género.
             </Text>
           )}
@@ -1541,34 +2499,40 @@ export function TeamsScreen() {
   )
 }
 
-const styles = StyleSheet.create({
-  safe: { flex: 1, backgroundColor: '#f9fafb' },
+function createStyles(theme: ReturnType<typeof useScreenTheme>) {
+  return StyleSheet.create({
+  safe: { flex: 1, backgroundColor: theme.bg },
   center: { flex: 1, justifyContent: 'center', alignItems: 'center', padding: 24 },
-  muted: { fontSize: 14, color: '#6b7280' },
+  muted: { fontSize: 14, color: theme.textMuted },
   header: {
     paddingHorizontal: 16,
     paddingVertical: 12,
-    backgroundColor: '#fff',
+    backgroundColor: theme.card,
     borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: '#e5e7eb',
+    borderBottomColor: theme.border,
   },
-  headerTitle: { fontSize: 20, fontWeight: '800', color: '#111' },
+  headerTitle: { fontSize: 20, fontWeight: '800', color: theme.text },
   scrollPad: { padding: 16, paddingBottom: 40 },
-  backRow: { marginBottom: 12 },
-  backLink: { fontSize: 16, color: '#0F4539', fontWeight: '700' },
-  h1: { fontSize: 22, fontWeight: '800', color: '#111', marginBottom: 8 },
-  sub: { fontSize: 14, color: '#6b7280', marginBottom: 12 },
-  bodyText: { fontSize: 15, color: '#374151', lineHeight: 22, marginBottom: 12 },
-  warn: { color: '#b45309', marginBottom: 12 },
-  label: { fontSize: 13, fontWeight: '600', color: '#374151', marginBottom: 6 },
+  backRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginBottom: 12,
+  },
+  backLink: { fontSize: 16, color: theme.primary, fontWeight: '700' },
+  h1: { fontSize: 22, fontWeight: '800', color: theme.text, marginBottom: 8 },
+  sub: { fontSize: 14, color: theme.textMuted, marginBottom: 12 },
+  bodyText: { fontSize: 15, color: theme.text, lineHeight: 22, marginBottom: 12 },
+  warn: { color: theme.accent, marginBottom: 12 },
+  label: { fontSize: 13, fontWeight: '600', color: theme.text, marginBottom: 6 },
   input: {
     borderWidth: 1,
-    borderColor: '#e5e7eb',
+    borderColor: theme.border,
     borderRadius: 10,
     padding: 12,
     fontSize: 16,
-    backgroundColor: '#fff',
-    color: '#111',
+    backgroundColor: theme.card,
+    color: theme.text,
   },
   inputMultiline: { minHeight: 88, textAlignVertical: 'top' },
   levelGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 16 },
@@ -1577,35 +2541,38 @@ const styles = StyleSheet.create({
     paddingHorizontal: 14,
     borderRadius: 10,
     borderWidth: 1,
-    borderColor: '#e5e7eb',
-    backgroundColor: '#fff',
+    borderColor: theme.border,
+    backgroundColor: theme.card,
   },
-  levelCellOn: { borderColor: '#0F4539', backgroundColor: 'rgba(15,69,57,0.12)' },
-  levelCellText: { fontSize: 14, fontWeight: '600', color: '#374151' },
-  levelCellTextOn: { color: '#0F4539' },
+  levelCellOn: {
+    borderColor: theme.primary,
+    backgroundColor: theme.selectedTint,
+  },
+  levelCellText: { fontSize: 14, fontWeight: '600', color: theme.text },
+  levelCellTextOn: { color: theme.primary },
   primaryBtn: {
-    backgroundColor: '#0F4539',
+    backgroundColor: theme.primary,
     borderRadius: 12,
     paddingVertical: 14,
     alignItems: 'center',
     marginTop: 8,
   },
-  primaryBtnText: { color: '#fff', fontSize: 16, fontWeight: '700' },
+  primaryBtnText: { color: theme.primaryBtnText, fontSize: 16, fontWeight: '700' },
   primaryBtnSm: {
-    backgroundColor: '#0F4539',
+    backgroundColor: theme.primary,
     borderRadius: 10,
     paddingVertical: 8,
     paddingHorizontal: 14,
   },
   outlineBtnSm: {
     borderWidth: 1,
-    borderColor: '#e5e7eb',
+    borderColor: theme.border,
     borderRadius: 10,
     paddingVertical: 8,
     paddingHorizontal: 14,
-    backgroundColor: '#fff',
+    backgroundColor: theme.card,
   },
-  outlineBtnSmText: { fontSize: 14, fontWeight: '600', color: '#374151' },
+  outlineBtnSmText: { fontSize: 14, fontWeight: '600', color: theme.text },
   btnDisabled: { opacity: 0.45 },
   block: { marginBottom: 24 },
   discoverListWrap: {
@@ -1620,18 +2587,18 @@ const styles = StyleSheet.create({
   blockTitle: {
     fontSize: 18,
     fontWeight: '800',
-    color: '#111',
+    color: theme.text,
     marginBottom: 8,
     letterSpacing: 0.3,
   },
-  hint: { fontSize: 12, color: '#6b7280', marginBottom: 10 },
+  hint: { fontSize: 12, color: theme.textMuted, marginBottom: 10 },
   createPill: {
-    backgroundColor: '#2563eb',
+    backgroundColor: theme.primary,
     paddingHorizontal: 12,
     paddingVertical: 6,
     borderRadius: 8,
   },
-  createPillText: { color: '#fff', fontWeight: '700', fontSize: 13 },
+  createPillText: { color: theme.primaryBtnText, fontWeight: '700', fontSize: 13 },
   emptyBox: {
     borderWidth: 1,
     borderStyle: 'dashed',
@@ -1644,29 +2611,11 @@ const styles = StyleSheet.create({
   },
   emptyTitle: { fontSize: 18, fontWeight: '600' },
   emptyLink: { fontSize: 16, fontWeight: '700' },
-  tabsWrap: {
-    flexDirection: 'row',
-    borderRadius: 12,
-    borderWidth: 1,
-    padding: 4,
-    marginBottom: 14,
-    gap: 6,
-  },
-  tabBtn: {
-    flex: 1,
-    borderRadius: 10,
-    minHeight: 40,
-    alignItems: 'center',
-    justifyContent: 'center',
-    flexDirection: 'row',
-    gap: 6,
-  },
-  tabBtnText: { fontSize: 13, fontWeight: '700' },
   card: {
-    backgroundColor: '#fff',
+    backgroundColor: theme.card,
     borderRadius: 12,
     borderWidth: 1,
-    borderColor: '#e5e7eb',
+    borderColor: theme.border,
     padding: 14,
     marginBottom: 10,
   },
@@ -1675,7 +2624,7 @@ const styles = StyleSheet.create({
     width: 56,
     height: 56,
     borderRadius: 12,
-    backgroundColor: '#eff6ff',
+    backgroundColor: theme.chipBg,
     alignItems: 'center',
     justifyContent: 'center',
     overflow: 'hidden',
@@ -1683,9 +2632,9 @@ const styles = StyleSheet.create({
   logoImg: { width: '100%', height: '100%' },
   cardMid: { flex: 1, minWidth: 0 },
   cardTitleRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
-  cardTitle: { fontSize: 16, fontWeight: '700', color: '#111', flex: 1 },
-  cardMeta: { fontSize: 13, color: '#6b7280', marginTop: 2 },
-  cardDesc: { fontSize: 12, color: '#9ca3af', marginTop: 2 },
+  cardTitle: { fontSize: 16, fontWeight: '700', color: theme.text, flex: 1 },
+  cardMeta: { fontSize: 13, color: theme.textMuted, marginTop: 2 },
+  cardDesc: { fontSize: 12, color: theme.textMuted, marginTop: 2 },
   myTeamCard: {
     borderRadius: 14,
     borderWidth: 1,
@@ -1731,7 +2680,7 @@ const styles = StyleSheet.create({
   fogueoBlock: {
     marginTop: 12,
     borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: '#e5e7eb',
+    borderTopColor: theme.border,
     paddingTop: 10,
   },
   fogueoTop: { flexDirection: 'row', alignItems: 'center', gap: 6 },
@@ -1744,7 +2693,7 @@ const styles = StyleSheet.create({
     marginTop: 10,
     paddingTop: 10,
     borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: '#e5e7eb',
+    borderTopColor: theme.border,
     fontSize: 13,
     lineHeight: 18,
   },
@@ -1779,26 +2728,26 @@ const styles = StyleSheet.create({
   smallBtn: {
     flex: 1,
     borderWidth: 1,
-    borderColor: '#e5e7eb',
+    borderColor: theme.border,
     borderRadius: 10,
     paddingVertical: 8,
     alignItems: 'center',
   },
   smallBtnOff: { opacity: 0.5 },
-  smallBtnText: { fontSize: 13, fontWeight: '600', color: '#374151' },
+  smallBtnText: { fontSize: 13, fontWeight: '600', color: theme.text },
   smallBtnRival: {
     flex: 1,
-    backgroundColor: '#dc2626',
+    backgroundColor: theme.danger,
     borderRadius: 10,
     paddingVertical: 8,
     alignItems: 'center',
   },
-  smallBtnRivalText: { fontSize: 13, fontWeight: '700', color: '#fff' },
+  smallBtnRivalText: { fontSize: 13, fontWeight: '700', color: theme.primaryBtnText },
   inviteCard: {
-    backgroundColor: '#fff',
+    backgroundColor: theme.card,
     borderRadius: 12,
     borderWidth: 1,
-    borderColor: '#e5e7eb',
+    borderColor: theme.border,
     padding: 14,
     marginBottom: 10,
   },
@@ -1807,18 +2756,18 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 12,
     marginBottom: 10,
-    backgroundColor: '#fff',
+    backgroundColor: theme.card,
     padding: 10,
     borderRadius: 10,
     borderWidth: 1,
-    borderColor: '#e5e7eb',
+    borderColor: theme.border,
   },
-  inviteName: { fontSize: 16, fontWeight: '700', color: '#111' },
-  inviteMeta: { fontSize: 13, color: '#6b7280' },
-  avatar: { width: 44, height: 44, borderRadius: 22, backgroundColor: '#e5e7eb' },
+  inviteName: { fontSize: 16, fontWeight: '700', color: theme.text },
+  inviteMeta: { fontSize: 13, color: theme.textMuted },
+  avatar: { width: 44, height: 44, borderRadius: 22, backgroundColor: theme.skeleton },
   rowActions: { flexDirection: 'row', gap: 8, marginTop: 8 },
   challengeCard: {
-    backgroundColor: '#fff',
+    backgroundColor: theme.card,
     borderRadius: 12,
     borderWidth: 1,
     borderColor: 'rgba(220, 38, 38, 0.35)',
@@ -1828,7 +2777,7 @@ const styles = StyleSheet.create({
   challengeKicker: {
     fontSize: 10,
     fontWeight: '700',
-    color: '#EF4444',
+    color: theme.danger,
     textTransform: 'uppercase',
     marginBottom: 6,
   },
@@ -1838,19 +2787,166 @@ const styles = StyleSheet.create({
     paddingVertical: 8,
     borderRadius: 8,
     borderWidth: 1,
-    borderColor: '#e5e7eb',
-    backgroundColor: '#fff',
+    borderColor: theme.border,
+    backgroundColor: theme.card,
   },
-  pickerOptOn: { borderColor: '#0F4539', backgroundColor: 'rgba(15,69,57,0.12)' },
-  pickerOptText: { fontSize: 13, color: '#374151' },
-  pickerOptTextOn: { fontWeight: '700', color: '#0F4539' },
-  rivalAccept: { backgroundColor: '#dc2626' },
+  pickerOptOn: {
+    borderColor: theme.primary,
+    backgroundColor: theme.selectedTint,
+  },
+  pickerOptText: { fontSize: 13, color: theme.text },
+  pickerOptTextOn: { fontWeight: '700', color: theme.primary },
+  rivalAccept: { backgroundColor: theme.danger },
   detailHead: { flexDirection: 'row', gap: 14, marginBottom: 16 },
-  detailLogo: {
-    width: 80,
-    height: 80,
+  detailHeroCard: {
+    borderRadius: 18,
+    borderWidth: 1,
+    padding: 16,
+    alignItems: 'center',
+    marginBottom: 14,
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: theme.isDark ? 0.2 : 0.06,
+    shadowRadius: 8,
+    elevation: 2,
+  },
+  detailHeroBody: { width: '100%', alignItems: 'center', marginTop: 12 },
+  detailHeroName: {
+    fontSize: 22,
+    fontWeight: '800',
+    color: theme.text,
+    textAlign: 'center',
+    letterSpacing: 0.2,
+  },
+  detailHeroPills: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'center',
+    gap: 8,
+    marginTop: 10,
+  },
+  detailCityPill: { fontSize: 11, fontWeight: '600', marginLeft: 4 },
+  detailCityPillWrap: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  detailRosterHint: { fontSize: 13, marginTop: 8, textAlign: 'center' },
+  detailDescription: {
+    fontSize: 14,
+    lineHeight: 20,
+    marginBottom: 14,
+    paddingHorizontal: 4,
+  },
+  detailStatsCard: {
     borderRadius: 16,
-    backgroundColor: '#eff6ff',
+    borderWidth: 1,
+    padding: 14,
+    marginBottom: 14,
+  },
+  detailSectionLabel: {
+    fontSize: 10,
+    fontWeight: '800',
+    letterSpacing: 1,
+    marginBottom: 10,
+  },
+  detailJoinBanner: {
+    borderRadius: 14,
+    borderWidth: 1,
+    padding: 14,
+    marginBottom: 14,
+  },
+  detailJoinBannerText: { fontSize: 14, fontWeight: '600', lineHeight: 20 },
+  detailJoinBtn: {
+    marginTop: 12,
+    borderRadius: 12,
+    paddingVertical: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+  },
+  detailLeadershipRow: { flexDirection: 'row', gap: 10, marginBottom: 16 },
+  detailLeadCard: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    borderRadius: 12,
+    borderWidth: 1,
+    padding: 12,
+  },
+  detailLeadLabel: { fontSize: 10, fontWeight: '700', textTransform: 'uppercase' },
+  detailLeadName: { fontSize: 14, fontWeight: '700', marginTop: 2 },
+  detailPlantillaHead: {
+    flexDirection: 'row',
+    alignItems: 'baseline',
+    justifyContent: 'space-between',
+    marginBottom: 12,
+  },
+  detailPlantillaCount: { fontSize: 13, fontWeight: '600' },
+  detailInviteBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    borderWidth: 1.5,
+    borderRadius: 12,
+    paddingVertical: 11,
+    marginBottom: 12,
+  },
+  detailInviteBtnText: { fontSize: 14, fontWeight: '700' },
+  detailMemberCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    borderRadius: 14,
+    borderWidth: 1,
+    padding: 12,
+    marginBottom: 8,
+  },
+  detailMemberBody: { flex: 1, minWidth: 0 },
+  detailStatusPill: {
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 999,
+  },
+  detailStatusPillText: { fontSize: 11, fontWeight: '700' },
+  emptySlotsCard: {
+    borderRadius: 14,
+    borderWidth: 1,
+    borderStyle: 'dashed',
+    padding: 14,
+    marginTop: 4,
+  },
+  emptySlotsHeader: { flexDirection: 'row', alignItems: 'center', gap: 12 },
+  emptySlotsIcon: {
+    width: 44,
+    height: 44,
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  emptySlotsTitle: { fontSize: 15, fontWeight: '700' },
+  emptySlotsSub: { fontSize: 12, marginTop: 2, lineHeight: 17 },
+  emptySlotsActions: {
+    flexDirection: 'row',
+    gap: 8,
+    marginTop: 12,
+  },
+  emptySlotAction: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 4,
+    borderWidth: 1,
+    borderRadius: 10,
+    paddingVertical: 9,
+  },
+  emptySlotActionText: { fontSize: 12, fontWeight: '700' },
+  detailLogo: {
+    width: 88,
+    height: 88,
+    borderRadius: 20,
     alignItems: 'center',
     justifyContent: 'center',
     overflow: 'hidden',
@@ -1864,18 +2960,20 @@ const styles = StyleSheet.create({
   },
   detailTitleRow: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'flex-start',
-    gap: 8,
+    flexWrap: 'wrap',
+    justifyContent: 'center',
+    alignItems: 'center',
+    gap: 12,
+    marginTop: 10,
   },
   capActions: { flexDirection: 'row', gap: 10 },
-  link: { fontSize: 14, fontWeight: '700', color: '#0F4539' },
-  dangerLink: { fontSize: 14, fontWeight: '600', color: '#dc2626' },
+  link: { fontSize: 14, fontWeight: '700', color: theme.primary },
+  dangerLink: { fontSize: 14, fontWeight: '600', color: theme.danger },
   joinBox: {
-    backgroundColor: '#fff',
+    backgroundColor: theme.card,
     borderRadius: 12,
     borderWidth: 1,
-    borderColor: '#e5e7eb',
+    borderColor: theme.border,
     padding: 12,
     marginBottom: 16,
   },
@@ -1889,47 +2987,81 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     marginBottom: 8,
   },
-  waBtnText: { color: '#fff', fontWeight: '700', fontSize: 16 },
-  rulesBox: {
-    marginTop: 12,
-    padding: 12,
-    backgroundColor: '#f9fafb',
-    borderRadius: 10,
+  waBtnText: { color: theme.primaryBtnText, fontWeight: '700', fontSize: 16 },
+  teamRulesCard: {
+    borderRadius: 16,
     borderWidth: 1,
-    borderColor: '#e5e7eb',
+    padding: 14,
+    marginTop: 14,
+    marginBottom: 14,
   },
-  rulesTitle: { fontWeight: '700', marginBottom: 6 },
-  rulesBody: { fontSize: 14, color: '#374151', lineHeight: 20 },
+  teamRulesHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    marginBottom: 4,
+  },
+  teamRulesIconWrap: {
+    width: 40,
+    height: 40,
+    borderRadius: 12,
+    borderWidth: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  teamRulesTitle: { fontSize: 16, fontWeight: '800' },
+  teamRulesSub: { fontSize: 12, marginTop: 2, fontWeight: '600' },
+  teamRulesList: { marginTop: 8 },
+  teamRuleRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 12,
+    paddingVertical: 12,
+  },
+  teamRuleRowDivider: {
+    borderTopWidth: StyleSheet.hairlineWidth,
+  },
+  teamRuleNum: {
+    width: 30,
+    height: 30,
+    borderRadius: 15,
+    borderWidth: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: 1,
+  },
+  teamRuleNumText: { fontSize: 13, fontWeight: '800' },
+  teamRuleText: { flex: 1, fontSize: 15, lineHeight: 22, fontWeight: '500' },
   statsRow: { flexDirection: 'row', gap: 12, marginBottom: 16 },
   statBox: {
     flex: 1,
-    backgroundColor: '#fff',
+    backgroundColor: theme.card,
     borderRadius: 12,
     borderWidth: 1,
-    borderColor: '#e5e7eb',
+    borderColor: theme.border,
     padding: 14,
     alignItems: 'center',
   },
-  statNum: { fontSize: 28, fontWeight: '800', color: '#0F4539' },
-  statLabel: { fontSize: 12, color: '#6b7280' },
+  statNum: { fontSize: 28, fontWeight: '800', color: theme.primary },
+  statLabel: { fontSize: 12, color: theme.textMuted },
   sectionTitle: { fontSize: 16, fontWeight: '800', marginBottom: 10 },
   roleRow: {
-    backgroundColor: '#fff',
+    backgroundColor: theme.card,
     borderWidth: 1,
-    borderColor: '#e5e7eb',
+    borderColor: theme.border,
     borderRadius: 12,
     padding: 12,
     gap: 4,
     marginBottom: 12,
   },
-  roleText: { fontSize: 13, color: '#374151', fontWeight: '600' },
+  roleText: { fontSize: 13, color: theme.text, fontWeight: '600' },
   memberRow: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 12,
     paddingVertical: 10,
     borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: '#e5e7eb',
+    borderBottomColor: theme.border,
   },
   slotRow: {
     flexDirection: 'row',
@@ -1937,7 +3069,211 @@ const styles = StyleSheet.create({
     gap: 10,
     paddingVertical: 12,
     borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: '#e5e7eb',
+    borderBottomColor: theme.border,
   },
   slotActions: { flexDirection: 'row', gap: 12, marginLeft: 'auto' },
+  captainTopBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 14,
+  },
+  captainDeleteBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderRadius: 10,
+  },
+  captainDeleteText: { color: '#fff', fontSize: 14, fontWeight: '700' },
+  captainHeroCard: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 14,
+    borderRadius: 18,
+    borderWidth: 1,
+    padding: 16,
+    marginBottom: 14,
+  },
+  captainLogoBox: {
+    width: 72,
+    height: 72,
+    borderRadius: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+    overflow: 'hidden',
+  },
+  captainLogoImg: { width: '100%', height: '100%' },
+  captainHeroInfo: { flex: 1, minWidth: 0 },
+  captainHeroName: { fontSize: 20, fontWeight: '800', letterSpacing: 0.2 },
+  captainPillsRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 6,
+    marginTop: 8,
+  },
+  captainBadgePill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 999,
+  },
+  captainBadgePillText: { fontSize: 11, fontWeight: '700', color: '#CA8A04' },
+  captainHeroActions: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 14,
+    marginTop: 10,
+  },
+  captainDescCard: {
+    borderRadius: 14,
+    borderWidth: 1,
+    padding: 14,
+    marginBottom: 14,
+  },
+  captainDescText: { fontSize: 14, lineHeight: 21 },
+  captainImpulseCard: {
+    borderRadius: 16,
+    borderWidth: 1,
+    padding: 14,
+    marginBottom: 14,
+  },
+  captainImpulseTop: { flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: 14 },
+  captainImpulseIcon: {
+    width: 44,
+    height: 44,
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  captainImpulseTier: { fontSize: 16, fontWeight: '800' },
+  captainImpulseSub: { fontSize: 13, marginTop: 2 },
+  captainImpulseLabel: {
+    fontSize: 10,
+    fontWeight: '800',
+    letterSpacing: 0.8,
+    marginBottom: 8,
+  },
+  captainImpulseBarRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  captainImpulsePct: { fontSize: 13, fontWeight: '800', minWidth: 36, textAlign: 'right' },
+  captainImpulseStats: { flexDirection: 'row', gap: 10, marginTop: 14 },
+  captainImpulseStat: {
+    flex: 1,
+    borderRadius: 12,
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+  },
+  captainImpulseStatLabel: { fontSize: 11, fontWeight: '600' },
+  captainImpulseStatVal: { fontSize: 20, fontWeight: '800', marginTop: 4 },
+  captainImpulseFoot: { fontSize: 11, lineHeight: 16, marginTop: 12 },
+  captainSectionCard: {
+    borderRadius: 14,
+    borderWidth: 1,
+    padding: 14,
+    marginBottom: 14,
+  },
+  captainSectionTitle: { fontSize: 15, fontWeight: '800', marginBottom: 10 },
+  captainVicePicker: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    borderWidth: 1,
+    borderRadius: 12,
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+  },
+  captainVicePlaceholder: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  captainViceName: { flex: 1, fontSize: 15, fontWeight: '600' },
+  captainWaCard: {
+    borderRadius: 14,
+    borderWidth: 1,
+    padding: 14,
+    marginBottom: 14,
+  },
+  captainWaHead: { flexDirection: 'row', alignItems: 'center', gap: 12 },
+  captainWaIconWrap: {
+    width: 44,
+    height: 44,
+    borderRadius: 12,
+    backgroundColor: 'rgba(37,211,102,0.12)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  captainWaTitle: { fontSize: 15, fontWeight: '800' },
+  captainWaSub: { fontSize: 12, marginTop: 2 },
+  captainWaActions: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 14 },
+  captainWaJoinBtn: {
+    backgroundColor: '#25D366',
+    borderRadius: 10,
+    paddingVertical: 10,
+    paddingHorizontal: 16,
+  },
+  captainWaJoinText: { color: '#fff', fontSize: 14, fontWeight: '700' },
+  captainWaEditBtn: {
+    borderWidth: 1,
+    borderRadius: 10,
+    paddingVertical: 10,
+    paddingHorizontal: 16,
+  },
+  captainWaEditText: { fontSize: 14, fontWeight: '600' },
+  captainMetricsRow: { flexDirection: 'row', gap: 12, marginBottom: 16 },
+  captainMetricCard: {
+    flex: 1,
+    borderRadius: 14,
+    borderWidth: 1,
+    paddingVertical: 18,
+    alignItems: 'center',
+  },
+  captainMetricNum: { fontSize: 36, fontWeight: '800' },
+  captainMetricLabel: { fontSize: 11, fontWeight: '800', letterSpacing: 0.6, marginTop: 4 },
+  captainPlantillaHead: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 12,
+  },
+  captainInvitePill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderRadius: 999,
+  },
+  captainInvitePillText: { color: theme.primaryBtnText, fontSize: 13, fontWeight: '700' },
+  captainMemberRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    borderRadius: 14,
+    borderWidth: 1,
+    padding: 12,
+    marginBottom: 8,
+  },
+  captainMemberNameRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flexWrap: 'wrap',
+    gap: 6,
+  },
+  captainRoleBadge: {
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: 999,
+  },
+  captainRoleBadgeText: { fontSize: 10, fontWeight: '800', color: '#CA8A04' },
+  captainActiveWrap: { flexDirection: 'row', alignItems: 'center', gap: 5 },
+  captainActiveDot: { width: 7, height: 7, borderRadius: 4 },
+  captainActiveText: { fontSize: 12, fontWeight: '700' },
+  captainPendingText: { fontSize: 12, fontWeight: '600' },
 })
+}

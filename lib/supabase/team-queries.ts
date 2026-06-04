@@ -89,6 +89,7 @@ function mapTeamRow(
     logo: (t.logo_url as string | null) ?? undefined,
     level: t.level as Level,
     captainId: t.captain_id as string,
+    viceCaptainId: (t.vice_captain_id as string | null) ?? null,
     members,
     city: t.city as string,
     gender: t.gender as Gender,

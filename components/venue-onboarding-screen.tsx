@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import {
   ActivityIndicator,
   Alert,
@@ -11,11 +11,12 @@ import {
 } from 'react-native'
 
 import { useApp } from '../lib/app-provider'
-import { useThemePreference } from '../lib/theme-context'
+import { useScreenTheme } from '../lib/theme-ui'
 
 export function VenueOnboardingScreen() {
   const { logout, completeVenueOnboarding } = useApp()
-  const { tokens } = useThemePreference()
+  const theme = useScreenTheme()
+  const styles = useMemo(() => createStyles(theme), [theme])
   const [form, setForm] = useState({
     name: '',
     address: '',
@@ -53,7 +54,7 @@ export function VenueOnboardingScreen() {
   }
 
   return (
-    <View style={[styles.flex, { backgroundColor: tokens.bgDark }]}>
+    <View style={styles.flex}>
       <View style={styles.header}>
         <Pressable onPress={() => void logout()} hitSlop={12} style={styles.backBtn}>
           <Text style={styles.backText}>← Salir</Text>
@@ -73,6 +74,7 @@ export function VenueOnboardingScreen() {
         <TextInput
           style={styles.input}
           placeholder="Ej: Club San Lorenzo"
+          placeholderTextColor={theme.textMuted}
           value={form.name}
           onChangeText={(name) => setForm({ ...form, name })}
         />
@@ -81,6 +83,7 @@ export function VenueOnboardingScreen() {
         <TextInput
           style={styles.input}
           placeholder="Calle y número"
+          placeholderTextColor={theme.textMuted}
           value={form.address}
           onChangeText={(address) => setForm({ ...form, address })}
         />
@@ -89,6 +92,7 @@ export function VenueOnboardingScreen() {
         <TextInput
           style={styles.input}
           value={form.city}
+          placeholderTextColor={theme.textMuted}
           onChangeText={(city) => setForm({ ...form, city })}
         />
 
@@ -96,6 +100,7 @@ export function VenueOnboardingScreen() {
         <TextInput
           style={styles.input}
           placeholder="+56..."
+          placeholderTextColor={theme.textMuted}
           keyboardType="phone-pad"
           value={form.phone}
           onChangeText={(phone) => setForm({ ...form, phone })}
@@ -105,6 +110,7 @@ export function VenueOnboardingScreen() {
         <TextInput
           style={styles.input}
           placeholder="https://maps.app.goo.gl/..."
+          placeholderTextColor={theme.textMuted}
           autoCapitalize="none"
           value={form.mapsUrl}
           onChangeText={(mapsUrl) => setForm({ ...form, mapsUrl })}
@@ -114,6 +120,7 @@ export function VenueOnboardingScreen() {
         <TextInput
           style={styles.input}
           keyboardType="number-pad"
+          placeholderTextColor={theme.textMuted}
           value={String(form.slotDurationMinutes)}
           onChangeText={(t) =>
             setForm({
@@ -132,7 +139,7 @@ export function VenueOnboardingScreen() {
           disabled={submitting}
         >
           {submitting ? (
-            <ActivityIndicator color="#fff" />
+            <ActivityIndicator color={theme.primaryBtnText} />
           ) : (
             <Text style={styles.submitText}>Crear mi centro</Text>
           )}
@@ -142,45 +149,49 @@ export function VenueOnboardingScreen() {
   )
 }
 
-const styles = StyleSheet.create({
-  flex: { flex: 1, backgroundColor: '#fff' },
-  header: {
-    paddingHorizontal: 16,
-    paddingTop: 8,
-    paddingBottom: 12,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: '#e5e7eb',
-    gap: 8,
-  },
-  backBtn: { alignSelf: 'flex-start', paddingVertical: 4 },
-  backText: { fontSize: 16, color: '#2563eb' },
-  h1: { fontSize: 20, fontWeight: '700' },
-  hint: { fontSize: 13, opacity: 0.65 },
-  scroll: { flex: 1 },
-  content: { padding: 20, paddingBottom: 40 },
-  label: {
-    fontSize: 14,
-    fontWeight: '600',
-    marginBottom: 6,
-    marginTop: 12,
-  },
-  input: {
-    borderWidth: 1,
-    borderColor: '#d1d5db',
-    borderRadius: 10,
-    paddingHorizontal: 14,
-    paddingVertical: 12,
-    fontSize: 16,
-    backgroundColor: '#fafafa',
-  },
-  help: { fontSize: 12, opacity: 0.65, marginTop: 6 },
-  submit: {
-    marginTop: 28,
-    backgroundColor: '#2563eb',
-    borderRadius: 12,
-    paddingVertical: 16,
-    alignItems: 'center',
-  },
-  submitDisabled: { opacity: 0.6 },
-  submitText: { color: '#fff', fontSize: 17, fontWeight: '600' },
-})
+function createStyles(theme: ReturnType<typeof useScreenTheme>) {
+  return StyleSheet.create({
+    flex: { flex: 1, backgroundColor: theme.bg },
+    header: {
+      paddingHorizontal: 16,
+      paddingTop: 8,
+      paddingBottom: 12,
+      borderBottomWidth: StyleSheet.hairlineWidth,
+      borderBottomColor: theme.border,
+      gap: 8,
+    },
+    backBtn: { alignSelf: 'flex-start', paddingVertical: 4 },
+    backText: { fontSize: 16, color: theme.link },
+    h1: { fontSize: 20, fontWeight: '700', color: theme.text },
+    hint: { fontSize: 13, color: theme.textMuted },
+    scroll: { flex: 1 },
+    content: { padding: 20, paddingBottom: 40 },
+    label: {
+      fontSize: 14,
+      fontWeight: '600',
+      marginBottom: 6,
+      marginTop: 12,
+      color: theme.text,
+    },
+    input: {
+      borderWidth: 1,
+      borderColor: theme.inputBorder,
+      borderRadius: 10,
+      paddingHorizontal: 14,
+      paddingVertical: 12,
+      fontSize: 16,
+      backgroundColor: theme.inputBg,
+      color: theme.text,
+    },
+    help: { fontSize: 12, color: theme.textMuted, marginTop: 6 },
+    submit: {
+      marginTop: 28,
+      backgroundColor: theme.primary,
+      borderRadius: 12,
+      paddingVertical: 16,
+      alignItems: 'center',
+    },
+    submitDisabled: { opacity: 0.6 },
+    submitText: { color: theme.primaryBtnText, fontSize: 17, fontWeight: '600' },
+  })
+}

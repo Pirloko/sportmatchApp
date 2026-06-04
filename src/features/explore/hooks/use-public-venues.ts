@@ -1,6 +1,6 @@
 import { useQuery } from '@tanstack/react-query'
 
-import { createClient, isSupabaseConfigured } from '@/lib/supabase/client'
+import { getSupabase, isSupabaseConfigured } from '@/lib/supabase/client'
 import { fetchSportsVenuesList } from '@/lib/supabase/venue-owner-queries'
 
 export function usePublicVenues() {
@@ -8,7 +8,7 @@ export function usePublicVenues() {
     queryKey: ['public-venues'],
     queryFn: async () => {
       if (!isSupabaseConfigured()) return []
-      const supabase = createClient()
+      const supabase = getSupabase()
       return fetchSportsVenuesList(supabase)
     },
     staleTime: 60_000,

@@ -1,6 +1,6 @@
 import { Ionicons } from '@expo/vector-icons'
 import * as ImagePicker from 'expo-image-picker'
-import { router } from 'expo-router'
+import { Link, router } from 'expo-router'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import {
   ActivityIndicator,
@@ -18,7 +18,7 @@ import { SafeAreaView } from 'react-native-safe-area-context'
 import { takeAndroidPendingImageAsset } from '../lib/android-image-picker-pending'
 import { levelLabel } from '../lib/format-match'
 import { useApp } from '../lib/app-provider'
-import { useThemePreference } from '../lib/theme-context'
+import { useScreenTheme } from '../lib/theme-ui'
 import { isSupabaseConfigured } from '../lib/supabase/client'
 import { DEFAULT_AVATAR } from '../lib/supabase/mappers'
 import type { Level } from '../lib/types'
@@ -61,60 +61,92 @@ function positionLabel(p: string): string {
   }
 }
 
+const LIGHT_BADGE = {
+  blue: {
+    backgroundColor: 'rgba(59, 130, 246, 0.12)',
+    borderColor: 'rgba(59, 130, 246, 0.35)',
+  },
+  primary: {
+    backgroundColor: 'rgba(37, 99, 235, 0.12)',
+    borderColor: 'rgba(37, 99, 235, 0.35)',
+  },
+  teal: {
+    backgroundColor: 'rgba(8, 145, 178, 0.12)',
+    borderColor: 'rgba(8, 145, 178, 0.35)',
+  },
+  red: {
+    backgroundColor: 'rgba(220, 38, 38, 0.12)',
+    borderColor: 'rgba(220, 38, 38, 0.35)',
+  },
+} as const
+
+function resolveLightBadge(
+  key: keyof typeof LIGHT_BADGE,
+  theme: ReturnType<typeof useScreenTheme>
+): { backgroundColor: string; borderColor: string } {
+  return LIGHT_BADGE[key]
+}
+
 function levelBadgeStyle(
   level: Level | undefined,
-  resolved: 'light' | 'dark'
+  theme: ReturnType<typeof useScreenTheme>
 ): object {
-  const dark = resolved === 'dark'
+  if (theme.isDark) {
+    switch (level) {
+      case 'principiante':
+        return {
+          backgroundColor: 'rgba(59, 130, 246, 0.22)',
+          borderColor: 'rgba(96, 165, 250, 0.5)',
+        }
+      case 'intermedio':
+        return {
+          backgroundColor: 'rgba(37, 99, 235, 0.22)',
+          borderColor: 'rgba(96, 165, 250, 0.5)',
+        }
+      case 'avanzado':
+        return {
+          backgroundColor: 'rgba(8, 145, 178, 0.22)',
+          borderColor: 'rgba(34, 211, 238, 0.45)',
+        }
+      case 'competitivo':
+        return {
+          backgroundColor: 'rgba(220, 38, 38, 0.2)',
+          borderColor: 'rgba(248, 113, 113, 0.5)',
+        }
+      default:
+        return {
+          backgroundColor: 'rgba(255,255,255,0.08)',
+          borderColor: 'rgba(148, 163, 184, 0.35)',
+        }
+    }
+  }
   switch (level) {
     case 'principiante':
-      return dark
-        ? {
-            backgroundColor: 'rgba(59, 130, 246, 0.22)',
-            borderColor: 'rgba(96, 165, 250, 0.5)',
-          }
-        : styles.badgeBlue
+      return resolveLightBadge('blue', theme)
     case 'intermedio':
-      return dark
-        ? {
-            backgroundColor: 'rgba(37, 99, 235, 0.22)',
-            borderColor: 'rgba(96, 165, 250, 0.5)',
-          }
-        : styles.badgePrimary
+      return resolveLightBadge('primary', theme)
     case 'avanzado':
-      return dark
-        ? {
-            backgroundColor: 'rgba(8, 145, 178, 0.22)',
-            borderColor: 'rgba(34, 211, 238, 0.45)',
-          }
-        : styles.badgeTeal
+      return resolveLightBadge('teal', theme)
     case 'competitivo':
-      return dark
-        ? {
-            backgroundColor: 'rgba(220, 38, 38, 0.2)',
-            borderColor: 'rgba(248, 113, 113, 0.5)',
-          }
-        : styles.badgeRed
+      return resolveLightBadge('red', theme)
     default:
-      return dark
-        ? {
-            backgroundColor: 'rgba(255,255,255,0.08)',
-            borderColor: 'rgba(148, 163, 184, 0.35)',
-          }
-        : styles.badgeNeutral
+      return {
+        backgroundColor: theme.chipBg,
+        borderColor: theme.border,
+      }
   }
 }
 
-function posAgeBadgeStyle(
-  resolved: 'light' | 'dark',
-  borderColor: string
-): object {
-  return resolved === 'dark'
+function posAgeBadgeStyle(theme: ReturnType<typeof useScreenTheme>): object {
+  return theme.isDark
     ? {
         backgroundColor: 'rgba(255,255,255,0.08)',
-        borderColor,
+        borderColor: theme.border,
       }
-    : styles.badgePos
+    : {
+        backgroundColor: theme.chipBg,
+        borderColor: theme.border,
+      }
 }
 
 /** Progreso de “nivel organizador” según partidos finalizados como creador. */
@@ -151,40 +183,38 @@ export function ProfileScreen() {
   const {
     currentUser,
     logout,
+    deleteAccount,
     openProfileEditor,
     matchOpportunities,
     getUserTeams,
     updateProfilePhoto,
   } = useApp()
-  const { tokens, resolved } = useThemePreference()
+  const theme = useScreenTheme()
+  const styles = useMemo(() => createStyles(theme), [theme])
 
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [photoWorking, setPhotoWorking] = useState(false)
+  const [deleteBusy, setDeleteBusy] = useState(false)
 
   const ui = useMemo(
     () => ({
-      statCellBg:
-        resolved === 'dark' ? 'rgba(255,255,255,0.06)' : '#f9fafb',
+      statCellBg: theme.inputBg,
       yellowCardBg:
-        resolved === 'dark' ? 'rgba(234, 179, 8, 0.14)' : '#FEFCE8',
+        theme.isDark ? 'rgba(234, 179, 8, 0.14)' : '#FEFCE8',
       yellowCardBorder:
-        resolved === 'dark' ? 'rgba(234, 179, 8, 0.45)' : '#EAB308',
+        theme.isDark ? 'rgba(234, 179, 8, 0.45)' : '#EAB308',
       redCardBg:
-        resolved === 'dark' ? 'rgba(239, 68, 68, 0.12)' : '#FEF2F2',
+        theme.isDark ? 'rgba(239, 68, 68, 0.12)' : '#FEF2F2',
       redCardBorder:
-        resolved === 'dark' ? 'rgba(239, 68, 68, 0.5)' : '#FECACA',
-      orgCardBg:
-        resolved === 'dark'
-          ? 'rgba(55, 214, 122, 0.12)'
-          : 'rgba(47, 158, 68, 0.1)',
-      orgCardBorder:
-        resolved === 'dark'
-          ? 'rgba(55, 214, 122, 0.35)'
-          : 'rgba(47, 158, 68, 0.35)',
-      progressTrack:
-        resolved === 'dark' ? 'rgba(255,255,255,0.12)' : '#E5E7EB',
+        theme.isDark ? 'rgba(239, 68, 68, 0.5)' : '#FECACA',
+      orgCardBg: theme.logoBoxBg,
+      orgCardBorder: theme.logoBoxBorder,
+      progressTrack: theme.isDark ? 'rgba(255,255,255,0.12)' : theme.border,
+      primaryAccent: theme.primaryAccent,
+      accentOnSurface: theme.accentOnSurface,
+      dangerOnSurface: theme.dangerOnSurface,
     }),
-    [resolved]
+    [theme]
   )
 
   const profileStats = useMemo(() => {
@@ -282,10 +312,55 @@ export function ProfileScreen() {
     await uploadProfilePhotoFromAsset(result.assets[0])
   }
 
+  const onDeleteAccountPress = useCallback(() => {
+    if (deleteBusy) return
+    Alert.alert(
+      'Eliminar cuenta',
+      'Esta acción eliminará tu cuenta y datos asociados y no se puede deshacer.',
+      [
+        { text: 'Cancelar', style: 'cancel' },
+        {
+          text: 'Continuar',
+          style: 'destructive',
+          onPress: () => {
+            Alert.alert(
+              'Confirmar eliminación',
+              '¿Estás seguro? Perderás acceso a equipos, partidos y mensajes vinculados a esta cuenta.',
+              [
+                { text: 'Cancelar', style: 'cancel' },
+                {
+                  text: 'Eliminar mi cuenta',
+                  style: 'destructive',
+                  onPress: () => {
+                    void (async () => {
+                      setDeleteBusy(true)
+                      try {
+                        const res = await deleteAccount()
+                        setSettingsOpen(false)
+                        if (!res.ok) {
+                          Alert.alert(
+                            'No se pudo eliminar la cuenta',
+                            res.error ?? 'Inténtalo más tarde.'
+                          )
+                        }
+                      } finally {
+                        setDeleteBusy(false)
+                      }
+                    })()
+                  },
+                },
+              ]
+            )
+          },
+        },
+      ]
+    )
+  }, [deleteAccount, deleteBusy])
+
   if (!currentUser) {
     return (
-      <View style={[styles.center, { backgroundColor: tokens.bgDark }]}>
-        <Text style={[styles.muted, { color: tokens.textMuted }]}>
+      <View style={[styles.center, { backgroundColor: theme.bg }]}>
+        <Text style={[styles.muted, { color: theme.textMuted }]}>
           Inicia sesión para ver tu perfil.
         </Text>
       </View>
@@ -294,10 +369,10 @@ export function ProfileScreen() {
 
   if (currentUser.accountType !== 'player') {
     return (
-      <SafeAreaView style={[styles.safe, { backgroundColor: tokens.bgDark }]} edges={['top']}>
+      <SafeAreaView style={[styles.safe, { backgroundColor: theme.bg }]} edges={['top']}>
         <ScrollView contentContainerStyle={styles.content}>
-          <Text style={[styles.title, { color: tokens.textPrimary }]}>Cuenta</Text>
-          <Text style={[styles.meta, { color: tokens.textMuted }]}>{currentUser.email}</Text>
+          <Text style={[styles.title, { color: theme.text }]}>Cuenta</Text>
+          <Text style={[styles.meta, { color: theme.textMuted }]}>{currentUser.email}</Text>
           <Pressable style={styles.outBtn} onPress={() => void logout()}>
             <Text style={styles.outBtnText}>Cerrar sesión</Text>
           </Pressable>
@@ -310,7 +385,7 @@ export function ProfileScreen() {
   const avatarUri = currentUser.photo || DEFAULT_AVATAR
 
   return (
-    <SafeAreaView style={[styles.safe, { backgroundColor: tokens.bgDark }]} edges={['top']}>
+    <SafeAreaView style={[styles.safe, { backgroundColor: theme.bg }]} edges={['top']}>
       <ScrollView
         style={styles.scroll}
         contentContainerStyle={styles.scrollContent}
@@ -320,17 +395,17 @@ export function ProfileScreen() {
           style={[
             styles.hero,
             {
-              backgroundColor: tokens.cardDark,
-              borderBottomColor: tokens.borderDark,
+              backgroundColor: theme.card,
+              borderBottomColor: theme.border,
             },
           ]}
         >
           <View style={styles.heroTop}>
             <View>
-              <Text style={[styles.heroKicker, { color: tokens.textMuted }]}>
+              <Text style={[styles.heroKicker, { color: theme.textMuted }]}>
                 Perfil
               </Text>
-              <Text style={[styles.heroTitle, { color: tokens.textPrimary }]}>
+              <Text style={[styles.heroTitle, { color: theme.text }]}>
                 Hola, {firstName}
               </Text>
             </View>
@@ -338,8 +413,8 @@ export function ProfileScreen() {
               style={[
                 styles.iconRound,
                 {
-                  borderColor: tokens.borderDark,
-                  backgroundColor: tokens.cardDark,
+                  borderColor: theme.border,
+                  backgroundColor: theme.card,
                 },
               ]}
               onPress={() => setSettingsOpen(true)}
@@ -348,7 +423,7 @@ export function ProfileScreen() {
               <Ionicons
                 name="settings-outline"
                 size={22}
-                color={tokens.textPrimary}
+                color={theme.text}
               />
             </Pressable>
           </View>
@@ -359,8 +434,8 @@ export function ProfileScreen() {
             style={[
               styles.card,
               {
-                backgroundColor: tokens.cardDark,
-                borderColor: tokens.borderDark,
+                backgroundColor: theme.card,
+                borderColor: theme.border,
               },
             ]}
           >
@@ -369,38 +444,38 @@ export function ProfileScreen() {
                 <Pressable
                   onPress={() => void pickProfilePhoto()}
                   disabled={photoWorking}
-                  style={[styles.avatarOuter, { borderColor: tokens.cardDark }]}
+                  style={[styles.avatarOuter, { borderColor: theme.card }]}
                 >
                   {photoWorking ? (
                     <View style={styles.avatarLoading}>
-                      <ActivityIndicator size="large" color={tokens.primaryGreen} />
+                      <ActivityIndicator size="large" color={theme.primary} />
                     </View>
                   ) : null}
                   <Image source={{ uri: avatarUri }} style={styles.avatarImg} />
                 </Pressable>
                 <Pressable
-                  style={[styles.camFab, { backgroundColor: tokens.primaryGreen, borderColor: tokens.cardDark }]}
+                  style={[styles.camFab, { backgroundColor: theme.primary, borderColor: theme.card }]}
                   onPress={() => void pickProfilePhoto()}
                   disabled={photoWorking}
                 >
-                  <Ionicons name="camera" size={18} color="#fff" />
+                  <Ionicons name="camera" size={18} color={theme.primaryBtnText} />
                 </Pressable>
               </View>
             </View>
             <Pressable onPress={() => void pickProfilePhoto()} disabled={photoWorking}>
-              <Text style={[styles.changePhoto, { color: tokens.textMuted }]}>
+              <Text style={[styles.changePhoto, { color: theme.textMuted }]}>
                 Cambiar foto
               </Text>
             </Pressable>
 
-            <Text style={[styles.name, { color: tokens.textPrimary }]}>
+            <Text style={[styles.name, { color: theme.text }]}>
               {currentUser.name}
             </Text>
-            <Text style={[styles.cityRow, { color: tokens.textMuted }]}>
+            <Text style={[styles.cityRow, { color: theme.textMuted }]}>
               📍 {currentUser.city?.trim() || 'Rancagua'}
             </Text>
             {currentUser.whatsappPhone?.trim() ? (
-              <Text style={[styles.phoneRow, { color: tokens.textMuted }]}>
+              <Text style={[styles.phoneRow, { color: theme.textMuted }]}>
                 📱 {currentUser.whatsappPhone}
               </Text>
             ) : null}
@@ -409,20 +484,20 @@ export function ProfileScreen() {
               <View
                 style={[
                   styles.badge,
-                  levelBadgeStyle(currentUser.level, resolved),
+                  levelBadgeStyle(currentUser.level, theme),
                 ]}
               >
-                <Text style={[styles.badgeTextDark, { color: tokens.textPrimary }]}>
+                <Text style={[styles.badgeTextDark, { color: theme.text }]}>
                   ⭐ {levelLabel(currentUser.level)}
                 </Text>
               </View>
               <View
                 style={[
                   styles.badge,
-                  posAgeBadgeStyle(resolved, tokens.borderDark),
+                  posAgeBadgeStyle(theme),
                 ]}
               >
-                <Text style={[styles.badgeTextDark, { color: tokens.textPrimary }]}>
+                <Text style={[styles.badgeTextDark, { color: theme.text }]}>
                   {positionLabel(currentUser.position) || 'Mediocampista'}
                 </Text>
               </View>
@@ -430,10 +505,10 @@ export function ProfileScreen() {
                 <View
                   style={[
                     styles.badge,
-                    posAgeBadgeStyle(resolved, tokens.borderDark),
+                    posAgeBadgeStyle(theme),
                   ]}
                 >
-                  <Text style={[styles.badgeTextDark, { color: tokens.textPrimary }]}>
+                  <Text style={[styles.badgeTextDark, { color: theme.text }]}>
                     {currentUser.age} años
                   </Text>
                 </View>
@@ -442,7 +517,7 @@ export function ProfileScreen() {
 
             {sortedAvailability.length > 0 ? (
               <View style={styles.avail}>
-                <Text style={[styles.availTitle, { color: tokens.textMuted }]}>
+                <Text style={[styles.availTitle, { color: theme.textMuted }]}>
                   📅 Disponibilidad
                 </Text>
                 <View style={styles.availRow}>
@@ -452,19 +527,16 @@ export function ProfileScreen() {
                       style={[
                         styles.availChip,
                         {
-                          backgroundColor:
-                            resolved === 'dark'
-                              ? 'rgba(55, 214, 122, 0.15)'
-                              : 'rgba(47, 158, 68, 0.12)',
-                          borderColor:
-                            resolved === 'dark'
-                              ? 'rgba(55, 214, 122, 0.35)'
-                              : 'rgba(47, 158, 68, 0.3)',
+                          backgroundColor: theme.logoBoxBg,
+                          borderColor: theme.logoBoxBorder,
                         },
                       ]}
                     >
                       <Text
-                        style={[styles.availChipText, { color: tokens.primaryGreen }]}
+                        style={[
+                          styles.availChipText,
+                          { color: theme.isDark ? ui.primaryAccent : theme.primary },
+                        ]}
                       >
                         {formatDayLabel(d)}
                       </Text>
@@ -477,7 +549,7 @@ export function ProfileScreen() {
             <View
               style={[
                 styles.statsSectionWrap,
-                { borderTopColor: tokens.borderDark },
+                { borderTopColor: theme.border },
               ]}
             >
               <View style={styles.perfGrid}>
@@ -508,35 +580,43 @@ export function ProfileScreen() {
                       hint: 'Tus equipos',
                     },
                   ] as const
-                ).map((cell) => (
+                ).map((cell) => {
+                  const iconColor =
+                    cell.icon === 'trophy' || cell.icon === 'people'
+                      ? ui.primaryAccent
+                      : cell.icon === 'remove-outline'
+                        ? ui.accentOnSurface
+                        : ui.dangerOnSurface
+                  return (
                   <View
                     key={cell.label}
                     style={[
                       styles.perfCell,
                       {
                         backgroundColor: ui.statCellBg,
-                        borderColor: tokens.borderDark,
+                        borderColor: theme.border,
                       },
                     ]}
                   >
                     <Ionicons
                       name={cell.icon}
                       size={20}
-                      color={tokens.primaryGreen}
+                      color={iconColor}
                     />
-                    <Text style={[styles.statNum, { color: tokens.textPrimary }]}>
+                    <Text style={[styles.statNum, { color: theme.text }]}>
                       {cell.value}
                     </Text>
                     <Text
-                      style={[styles.statLabel, { color: tokens.textPrimary }]}
+                      style={[styles.statLabel, { color: theme.text }]}
                     >
                       {cell.label}
                     </Text>
-                    <Text style={[styles.statHint, { color: tokens.textMuted }]}>
+                    <Text style={[styles.statHint, { color: theme.textMuted }]}>
                       {cell.hint}
                     </Text>
                   </View>
-                ))}
+                  )
+                })}
               </View>
 
               <View style={styles.sectionBlock}>
@@ -544,10 +624,10 @@ export function ProfileScreen() {
                   <Ionicons
                     name="shield-checkmark"
                     size={18}
-                    color={tokens.primaryGreen}
+                    color={ui.primaryAccent}
                   />
                   <Text
-                    style={[styles.sectionTitle, { color: tokens.textPrimary }]}
+                    style={[styles.sectionTitle, { color: theme.text }]}
                   >
                     Historial de amonestaciones por reportes
                   </Text>
@@ -562,18 +642,18 @@ export function ProfileScreen() {
                       },
                     ]}
                   >
-                    <Ionicons name="warning" size={22} color="#CA8A04" />
+                    <Ionicons name="warning" size={22} color={theme.accent} />
                     <Text
-                      style={[styles.modCardNum, { color: tokens.textPrimary }]}
+                      style={[styles.modCardNum, { color: theme.text }]}
                     >
                       {profileStats.yellow}
                     </Text>
                     <Text
-                      style={[styles.modCardTitle, { color: tokens.textPrimary }]}
+                      style={[styles.modCardTitle, { color: theme.text }]}
                     >
                       Amarillas
                     </Text>
-                    <Text style={[styles.modCardHint, { color: tokens.textMuted }]}>
+                    <Text style={[styles.modCardHint, { color: theme.textMuted }]}>
                       Acumuladas en cuenta
                     </Text>
                   </View>
@@ -589,19 +669,19 @@ export function ProfileScreen() {
                     <Ionicons
                       name="alert-circle"
                       size={22}
-                      color={tokens.danger}
+                      color={theme.danger}
                     />
                     <Text
-                      style={[styles.modCardNum, { color: tokens.textPrimary }]}
+                      style={[styles.modCardNum, { color: theme.text }]}
                     >
                       {profileStats.red}
                     </Text>
                     <Text
-                      style={[styles.modCardTitle, { color: tokens.textPrimary }]}
+                      style={[styles.modCardTitle, { color: theme.text }]}
                     >
                       Rojas
                     </Text>
-                    <Text style={[styles.modCardHint, { color: tokens.textMuted }]}>
+                    <Text style={[styles.modCardHint, { color: theme.textMuted }]}>
                       Acumuladas en cuenta
                     </Text>
                   </View>
@@ -613,10 +693,10 @@ export function ProfileScreen() {
                   <Ionicons
                     name="shield-checkmark"
                     size={18}
-                    color={tokens.primaryGreen}
+                    color={ui.primaryAccent}
                   />
                   <Text
-                    style={[styles.sectionTitle, { color: tokens.textPrimary }]}
+                    style={[styles.sectionTitle, { color: theme.text }]}
                   >
                     Organización de partidos
                   </Text>
@@ -633,16 +713,16 @@ export function ProfileScreen() {
                   <View style={styles.orgTopRow}>
                     <View style={styles.orgLeft}>
                       <Text
-                        style={[styles.orgBigNum, { color: tokens.textPrimary }]}
+                        style={[styles.orgBigNum, { color: theme.text }]}
                       >
                         {profileStats.organizedCompleted}
                       </Text>
-                      <Text style={[styles.orgSub, { color: tokens.textMuted }]}>
+                      <Text style={[styles.orgSub, { color: theme.textMuted }]}>
                         Partidos organizados finalizados
                       </Text>
                     </View>
                     <Text
-                      style={[styles.orgTierLabel, { color: tokens.primaryGreen }]}
+                      style={[styles.orgTierLabel, { color: theme.primary }]}
                     >
                       {profileStats.orgTier.label}
                     </Text>
@@ -658,18 +738,18 @@ export function ProfileScreen() {
                         styles.progressFill,
                         {
                           width: `${Math.round(profileStats.orgTier.progress * 100)}%`,
-                          backgroundColor: tokens.primaryGreen,
+                          backgroundColor: theme.primary,
                         },
                       ]}
                     />
                   </View>
                   {profileStats.orgTier.nextLabel ? (
-                    <Text style={[styles.orgNext, { color: tokens.textMuted }]}>
+                    <Text style={[styles.orgNext, { color: theme.textMuted }]}>
                       Siguiente: {profileStats.orgTier.nextLabel}
                     </Text>
                   ) : null}
                   <Text
-                    style={[styles.orgFooter, { color: tokens.textPrimary }]}
+                    style={[styles.orgFooter, { color: theme.text }]}
                   >
                     Victorias de tu equipo al organizar:{' '}
                     {profileStats.organizerWins}
@@ -684,7 +764,7 @@ export function ProfileScreen() {
           <Pressable
             style={[
               styles.menuRow,
-              { backgroundColor: tokens.cardDark, borderColor: tokens.borderDark },
+              { backgroundColor: theme.card, borderColor: theme.border },
             ]}
             onPress={openProfileEditor}
           >
@@ -693,31 +773,31 @@ export function ProfileScreen() {
                 styles.menuIcon,
                 {
                   backgroundColor:
-                    resolved === 'dark' ? 'rgba(255,255,255,0.08)' : '#f3f4f6',
+                    theme.inputBg,
                 },
               ]}
             >
               <Ionicons
                 name="create-outline"
                 size={22}
-                color={tokens.textMuted}
+                color={theme.textMuted}
               />
             </View>
             <View style={styles.menuText}>
-              <Text style={[styles.menuTitle, { color: tokens.textPrimary }]}>
+              <Text style={[styles.menuTitle, { color: theme.text }]}>
                 Editar perfil
               </Text>
-              <Text style={[styles.menuSub, { color: tokens.textMuted }]}>
+              <Text style={[styles.menuSub, { color: theme.textMuted }]}>
                 Nombre, posición, nivel, foto…
               </Text>
             </View>
-            <Ionicons name="chevron-forward" size={20} color={tokens.textMuted} />
+            <Ionicons name="chevron-forward" size={20} color={theme.textMuted} />
           </Pressable>
 
           <Pressable
             style={[
               styles.menuRow,
-              { backgroundColor: tokens.cardDark, borderColor: tokens.borderDark },
+              { backgroundColor: theme.card, borderColor: theme.border },
             ]}
             onPress={() => router.push('/equipos')}
           >
@@ -726,31 +806,31 @@ export function ProfileScreen() {
                 styles.menuIcon,
                 {
                   backgroundColor:
-                    resolved === 'dark' ? 'rgba(255,255,255,0.08)' : '#f3f4f6',
+                    theme.inputBg,
                 },
               ]}
             >
               <Ionicons
                 name="people-outline"
                 size={22}
-                color={tokens.textMuted}
+                color={theme.textMuted}
               />
             </View>
             <View style={styles.menuText}>
-              <Text style={[styles.menuTitle, { color: tokens.textPrimary }]}>
+              <Text style={[styles.menuTitle, { color: theme.text }]}>
                 Mis equipos
               </Text>
-              <Text style={[styles.menuSub, { color: tokens.textMuted }]}>
+              <Text style={[styles.menuSub, { color: theme.textMuted }]}>
                 Crear o gestionar equipos
               </Text>
             </View>
-            <Ionicons name="chevron-forward" size={20} color={tokens.textMuted} />
+            <Ionicons name="chevron-forward" size={20} color={theme.textMuted} />
           </Pressable>
 
           <Pressable
             style={[
               styles.menuRow,
-              { backgroundColor: tokens.cardDark, borderColor: tokens.borderDark },
+              { backgroundColor: theme.card, borderColor: theme.border },
             ]}
             onPress={() => router.push('/partidos?tab=mine')}
           >
@@ -759,31 +839,31 @@ export function ProfileScreen() {
                 styles.menuIcon,
                 {
                   backgroundColor:
-                    resolved === 'dark' ? 'rgba(255,255,255,0.08)' : '#f3f4f6',
+                    theme.inputBg,
                 },
               ]}
             >
               <Ionicons
                 name="time-outline"
                 size={22}
-                color={tokens.textMuted}
+                color={theme.textMuted}
               />
             </View>
             <View style={styles.menuText}>
-              <Text style={[styles.menuTitle, { color: tokens.textPrimary }]}>
+              <Text style={[styles.menuTitle, { color: theme.text }]}>
                 Historial de partidos
               </Text>
-              <Text style={[styles.menuSub, { color: tokens.textMuted }]}>
+              <Text style={[styles.menuSub, { color: theme.textMuted }]}>
                 Próximos y jugados
               </Text>
             </View>
-            <Ionicons name="chevron-forward" size={20} color={tokens.textMuted} />
+            <Ionicons name="chevron-forward" size={20} color={theme.textMuted} />
           </Pressable>
 
           <Pressable
             style={[
               styles.menuRow,
-              { backgroundColor: tokens.cardDark, borderColor: tokens.borderDark },
+              { backgroundColor: theme.card, borderColor: theme.border },
             ]}
             onPress={() => setSettingsOpen(true)}
           >
@@ -792,25 +872,25 @@ export function ProfileScreen() {
                 styles.menuIcon,
                 {
                   backgroundColor:
-                    resolved === 'dark' ? 'rgba(255,255,255,0.08)' : '#f3f4f6',
+                    theme.inputBg,
                 },
               ]}
             >
               <Ionicons
                 name="settings-outline"
                 size={22}
-                color={tokens.textMuted}
+                color={theme.textMuted}
               />
             </View>
             <View style={styles.menuText}>
-              <Text style={[styles.menuTitle, { color: tokens.textPrimary }]}>
+              <Text style={[styles.menuTitle, { color: theme.text }]}>
                 Configuración
               </Text>
-              <Text style={[styles.menuSub, { color: tokens.textMuted }]}>
+              <Text style={[styles.menuSub, { color: theme.textMuted }]}>
                 Ajustes y app
               </Text>
             </View>
-            <Ionicons name="chevron-forward" size={20} color={tokens.textMuted} />
+            <Ionicons name="chevron-forward" size={20} color={theme.textMuted} />
           </Pressable>
         </View>
 
@@ -818,19 +898,19 @@ export function ProfileScreen() {
           style={[
             styles.logoutWide,
             {
-              backgroundColor: tokens.cardDark,
+              backgroundColor: theme.card,
               borderColor: 'rgba(220, 38, 38, 0.4)',
             },
           ]}
           onPress={() => void logout()}
         >
-          <Ionicons name="log-out-outline" size={20} color={tokens.danger} />
-          <Text style={[styles.logoutWideText, { color: tokens.danger }]}>
+          <Ionicons name="log-out-outline" size={20} color={theme.danger} />
+          <Text style={[styles.logoutWideText, { color: theme.danger }]}>
             Cerrar sesión
           </Text>
         </Pressable>
 
-        <Text style={[styles.version, { color: tokens.textMuted }]}>
+        <Text style={[styles.version, { color: theme.textMuted }]}>
           SportMatch v1.0.0
         </Text>
       </ScrollView>
@@ -849,19 +929,19 @@ export function ProfileScreen() {
         <View
           style={[
             styles.modalSheet,
-            { backgroundColor: tokens.cardDark },
+            { backgroundColor: theme.card },
           ]}
         >
           <View
             style={[
               styles.modalHandle,
-              { backgroundColor: tokens.borderDark },
+              { backgroundColor: theme.border },
             ]}
           />
-          <Text style={[styles.modalTitle, { color: tokens.textPrimary }]}>
+          <Text style={[styles.modalTitle, { color: theme.text }]}>
             Configuración
           </Text>
-          <Text style={[styles.modalDesc, { color: tokens.textMuted }]}>
+          <Text style={[styles.modalDesc, { color: theme.textMuted }]}>
             Ajustes de la cuenta y la aplicación.
           </Text>
           <ScrollView style={styles.modalScroll}>
@@ -870,15 +950,15 @@ export function ProfileScreen() {
                 styles.settingBlock,
                 {
                   backgroundColor:
-                    resolved === 'dark' ? 'rgba(255,255,255,0.06)' : '#f9fafb',
-                  borderColor: tokens.borderDark,
+                    theme.inputBg,
+                  borderColor: theme.border,
                 },
               ]}
             >
-              <Text style={[styles.settingHead, { color: tokens.textPrimary }]}>
+              <Text style={[styles.settingHead, { color: theme.text }]}>
                 Apariencia
               </Text>
-              <Text style={[styles.settingBody, { color: tokens.textMuted }]}>
+              <Text style={[styles.settingBody, { color: theme.textMuted }]}>
                 Tema claro / oscuro: próximamente (Bloque 17).
               </Text>
             </View>
@@ -887,15 +967,15 @@ export function ProfileScreen() {
                 styles.settingBlock,
                 {
                   backgroundColor:
-                    resolved === 'dark' ? 'rgba(255,255,255,0.06)' : '#f9fafb',
-                  borderColor: tokens.borderDark,
+                    theme.inputBg,
+                  borderColor: theme.border,
                 },
               ]}
             >
-              <Text style={[styles.settingHead, { color: tokens.textPrimary }]}>
+              <Text style={[styles.settingHead, { color: theme.text }]}>
                 Notificaciones
               </Text>
-              <Text style={[styles.settingBody, { color: tokens.textMuted }]}>
+              <Text style={[styles.settingBody, { color: theme.textMuted }]}>
                 Próximamente podrás elegir avisos de partidos y mensajes.
               </Text>
             </View>
@@ -904,32 +984,82 @@ export function ProfileScreen() {
                 styles.settingBlock,
                 {
                   backgroundColor:
-                    resolved === 'dark' ? 'rgba(255,255,255,0.06)' : '#f9fafb',
-                  borderColor: tokens.borderDark,
+                    theme.inputBg,
+                  borderColor: theme.border,
                 },
               ]}
             >
-              <Text style={[styles.settingHead, { color: tokens.textPrimary }]}>
-                Privacidad
+              <Text style={[styles.settingHead, { color: theme.text }]}>
+                Cuenta
               </Text>
-              <Text style={[styles.settingBody, { color: tokens.textMuted }]}>
-                Tus datos se usan solo para conectar partidos dentro de la app.
+              <Text style={[styles.settingBody, { color: theme.textMuted }]}>
+                Puedes eliminar tu cuenta y los datos asociados de forma permanente.
               </Text>
+              <Pressable
+                style={[
+                  styles.deleteAccountBtn,
+                  deleteBusy && styles.deleteAccountBtnDisabled,
+                ]}
+                onPress={onDeleteAccountPress}
+                disabled={deleteBusy}
+              >
+                {deleteBusy ? (
+                  <ActivityIndicator color={theme.danger} size="small" />
+                ) : (
+                  <Text style={[styles.deleteAccountText, { color: theme.danger }]}>
+                    Eliminar mi cuenta
+                  </Text>
+                )}
+              </Pressable>
             </View>
             <View
               style={[
                 styles.settingBlock,
                 {
                   backgroundColor:
-                    resolved === 'dark' ? 'rgba(255,255,255,0.06)' : '#f9fafb',
-                  borderColor: tokens.borderDark,
+                    theme.inputBg,
+                  borderColor: theme.border,
                 },
               ]}
             >
-              <Text style={[styles.settingHead, { color: tokens.textPrimary }]}>
+              <Text style={[styles.settingHead, { color: theme.text }]}>
+                Privacidad
+              </Text>
+              <Text style={[styles.settingBody, { color: theme.textMuted }]}>
+                Tus datos se usan solo para conectar partidos dentro de la app.
+              </Text>
+              <View style={styles.legalLinksRow}>
+                <Link href="/privacy-policy" asChild>
+                  <Pressable>
+                    <Text style={[styles.legalLinkText, { color: theme.primary }]}>
+                      Política de Privacidad
+                    </Text>
+                  </Pressable>
+                </Link>
+                <Text style={[styles.legalSep, { color: theme.textMuted }]}>·</Text>
+                <Link href="/terms" asChild>
+                  <Pressable>
+                    <Text style={[styles.legalLinkText, { color: theme.primary }]}>
+                      Términos de Uso
+                    </Text>
+                  </Pressable>
+                </Link>
+              </View>
+            </View>
+            <View
+              style={[
+                styles.settingBlock,
+                {
+                  backgroundColor:
+                    theme.inputBg,
+                  borderColor: theme.border,
+                },
+              ]}
+            >
+              <Text style={[styles.settingHead, { color: theme.text }]}>
                 Acerca de
               </Text>
-              <Text style={[styles.settingBody, { color: tokens.textMuted }]}>
+              <Text style={[styles.settingBody, { color: theme.textMuted }]}>
                 SportMatch — encuentra rivales, jugadores y revueltas en tu ciudad.
               </Text>
             </View>
@@ -941,7 +1071,7 @@ export function ProfileScreen() {
               void logout()
             }}
           >
-            <Text style={[styles.modalLogoutText, { color: tokens.danger }]}>
+            <Text style={[styles.modalLogoutText, { color: theme.danger }]}>
               Cerrar sesión
             </Text>
           </Pressable>
@@ -949,7 +1079,7 @@ export function ProfileScreen() {
             style={styles.modalClose}
             onPress={() => setSettingsOpen(false)}
           >
-            <Text style={[styles.modalCloseText, { color: tokens.primaryGreen }]}>
+            <Text style={[styles.modalCloseText, { color: theme.primary }]}>
               Cerrar
             </Text>
           </Pressable>
@@ -960,30 +1090,31 @@ export function ProfileScreen() {
   )
 }
 
-const styles = StyleSheet.create({
-  safe: { flex: 1, backgroundColor: '#f9fafb' },
+function createStyles(theme: ReturnType<typeof useScreenTheme>) {
+  return StyleSheet.create({
+  safe: { flex: 1, backgroundColor: theme.bg },
   scroll: { flex: 1 },
   scrollContent: { paddingBottom: 32 },
   center: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 24 },
-  muted: { fontSize: 15, color: '#6b7280' },
+  muted: { fontSize: 15, color: theme.textMuted },
   content: { padding: 24 },
-  title: { fontSize: 22, fontWeight: '800', color: '#111', marginBottom: 8 },
-  meta: { fontSize: 14, color: '#6b7280', marginBottom: 20 },
+  title: { fontSize: 22, fontWeight: '800', color: theme.text, marginBottom: 8 },
+  meta: { fontSize: 14, color: theme.textMuted, marginBottom: 20 },
   outBtn: {
     alignSelf: 'flex-start',
     paddingVertical: 12,
     paddingHorizontal: 20,
-    backgroundColor: '#f3f4f6',
+    backgroundColor: theme.chipBg,
     borderRadius: 10,
   },
-  outBtnText: { fontSize: 16, fontWeight: '600', color: '#374151' },
+  outBtnText: { fontSize: 16, fontWeight: '600', color: theme.text },
   hero: {
     paddingHorizontal: 16,
     paddingTop: 8,
     paddingBottom: 20,
     borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: '#e5e7eb',
-    backgroundColor: '#fff',
+    borderBottomColor: theme.border,
+    backgroundColor: theme.card,
   },
   heroTop: {
     flexDirection: 'row',
@@ -993,27 +1124,27 @@ const styles = StyleSheet.create({
   heroKicker: {
     fontSize: 11,
     fontWeight: '700',
-    color: '#6b7280',
+    color: theme.textMuted,
     textTransform: 'uppercase',
     letterSpacing: 0.6,
   },
-  heroTitle: { fontSize: 24, fontWeight: '800', color: '#111', marginTop: 4 },
+  heroTitle: { fontSize: 24, fontWeight: '800', color: theme.text, marginTop: 4 },
   iconRound: {
     width: 40,
     height: 40,
     borderRadius: 20,
     borderWidth: 1,
-    borderColor: '#e5e7eb',
+    borderColor: theme.border,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: '#fff',
+    backgroundColor: theme.card,
   },
   cardWrap: { paddingHorizontal: 16, marginTop: -12 },
   card: {
-    backgroundColor: '#fff',
+    backgroundColor: theme.card,
     borderRadius: 16,
     borderWidth: 1,
-    borderColor: '#e5e7eb',
+    borderColor: theme.border,
     padding: 20,
     paddingTop: 0,
     shadowColor: '#000',
@@ -1033,16 +1164,16 @@ const styles = StyleSheet.create({
     height: 112,
     borderRadius: 56,
     borderWidth: 4,
-    borderColor: '#fff',
+    borderColor: theme.card,
     overflow: 'hidden',
-    backgroundColor: '#e5e7eb',
+    backgroundColor: theme.skeleton,
   },
   avatarImg: { width: '100%', height: '100%' },
   avatarLoading: {
     ...StyleSheet.absoluteFillObject,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: 'rgba(255,255,255,0.7)',
+    backgroundColor: theme.overlay,
     zIndex: 2,
   },
   camFab: {
@@ -1052,34 +1183,34 @@ const styles = StyleSheet.create({
     width: 36,
     height: 36,
     borderRadius: 18,
-    backgroundColor: '#2563eb',
+    backgroundColor: theme.primary,
     alignItems: 'center',
     justifyContent: 'center',
     borderWidth: 3,
-    borderColor: '#fff',
+    borderColor: theme.card,
   },
   changePhoto: {
     fontSize: 12,
-    color: '#6b7280',
+    color: theme.textMuted,
     marginTop: 8,
     marginBottom: 4,
   },
   name: {
     fontSize: 20,
     fontWeight: '800',
-    color: '#111',
+    color: theme.text,
     textAlign: 'center',
     marginTop: 8,
   },
   cityRow: {
     fontSize: 14,
-    color: '#6b7280',
+    color: theme.textMuted,
     textAlign: 'center',
     marginTop: 6,
   },
   phoneRow: {
     fontSize: 14,
-    color: '#6b7280',
+    color: theme.textMuted,
     textAlign: 'center',
     marginTop: 4,
   },
@@ -1113,19 +1244,19 @@ const styles = StyleSheet.create({
     borderColor: 'rgba(220, 38, 38, 0.35)',
   },
   badgeNeutral: {
-    backgroundColor: '#f3f4f6',
-    borderColor: '#e5e7eb',
+    backgroundColor: theme.chipBg,
+    borderColor: theme.border,
   },
   badgePos: {
-    backgroundColor: '#f3f4f6',
-    borderColor: '#e5e7eb',
+    backgroundColor: theme.chipBg,
+    borderColor: theme.border,
   },
-  badgeTextDark: { fontSize: 12, fontWeight: '600', color: '#374151' },
+  badgeTextDark: { fontSize: 12, fontWeight: '600', color: theme.text },
   avail: { marginTop: 18, width: '100%' },
   availTitle: {
     fontSize: 12,
     fontWeight: '600',
-    color: '#6b7280',
+    color: theme.textMuted,
     textAlign: 'center',
     marginBottom: 8,
   },
@@ -1138,7 +1269,7 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: 'rgba(37, 99, 235, 0.25)',
   },
-  availChipText: { fontSize: 11, fontWeight: '600', color: '#1d4ed8' },
+  availChipText: { fontSize: 11, fontWeight: '600', color: theme.primary },
   statsSectionWrap: {
     marginTop: 22,
     paddingTop: 18,
@@ -1285,6 +1416,27 @@ const styles = StyleSheet.create({
     borderColor: 'rgba(220, 38, 38, 0.4)',
   },
   modalLogoutText: { fontSize: 16, fontWeight: '700' },
+  deleteAccountBtn: {
+    marginTop: 12,
+    paddingVertical: 12,
+    paddingHorizontal: 14,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: 'rgba(220, 38, 38, 0.45)',
+    alignItems: 'center',
+  },
+  deleteAccountBtnDisabled: { opacity: 0.6 },
+  deleteAccountText: { fontSize: 15, fontWeight: '700' },
+  legalLinksRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    alignItems: 'center',
+    gap: 6,
+    marginTop: 10,
+  },
+  legalLinkText: { fontSize: 14, fontWeight: '600' },
+  legalSep: { fontSize: 14 },
   modalClose: { marginTop: 10, paddingVertical: 12, alignItems: 'center' },
   modalCloseText: { fontSize: 16, fontWeight: '600' },
 })
+}

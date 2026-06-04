@@ -21,7 +21,7 @@ import { RivalTeamPickerModal } from './rival-team-picker-modal'
 import { alertJoinResult } from '../lib/alert-join-result'
 import { startOfToday } from '../lib/format-match'
 import { useApp } from '../lib/app-provider'
-import { useThemePreference } from '../lib/theme-context'
+import { useScreenTheme } from '../lib/theme-ui'
 import type { Level, MatchOpportunity, MatchType, SportsVenue } from '../lib/types'
 import { usePublicVenues } from '../src/features/explore/hooks/use-public-venues'
 
@@ -68,28 +68,9 @@ export function ExploreScreen() {
     types: MatchType[]
     levels: Level[]
   }>({ types: [], levels: [] })
+  const theme = useScreenTheme()
+  const styles = useMemo(() => createExploreStyles(theme), [theme])
   const { data: publicVenues = [] } = usePublicVenues()
-  const { resolved } = useThemePreference()
-  const isDark = resolved === 'dark'
-  const ui = isDark
-    ? {
-        bg: '#090B0A',
-        surface: '#141717',
-        surfaceSoft: '#1a1f1d',
-        border: '#2C3131',
-        text: '#F5F7F7',
-        muted: '#9CA3A3',
-        accent: '#0F4539',
-      }
-    : {
-        bg: '#F4F7F2',
-        surface: '#FFFFFF',
-        surfaceSoft: '#EEF3EC',
-        border: '#CFD8CE',
-        text: '#1F2A22',
-        muted: '#667267',
-        accent: '#0F4539',
-      }
 
   const midnight = useMemo(() => startOfToday(), [])
   const userCityNormalized = normalizeLocation(currentUser?.city)
@@ -208,11 +189,6 @@ export function ExploreScreen() {
     }
 
     if (isTeamPickType(type)) {
-      if (getUserTeams().length === 0) {
-        Alert.alert('Equipo requerido', 'Para team pick debes pertenecer a un equipo.')
-        router.push('/equipos')
-        return
-      }
       const m = filteredMatches.find((x) => x.id === opportunityId)
       if (m) setTeamPickJoinOpp(m)
       return
@@ -261,9 +237,9 @@ export function ExploreScreen() {
 
   if (!currentUser || currentUser.accountType !== 'player') {
     return (
-      <SafeAreaView style={[styles.safe, { backgroundColor: ui.bg }]} edges={['top']}>
+      <SafeAreaView style={styles.safe} edges={['top']}>
         <View style={styles.gate}>
-          <Text style={[styles.gateText, { color: ui.muted }]}>
+          <Text style={styles.gateText}>
             Explorar está disponible para cuentas jugador.
           </Text>
         </View>
@@ -272,27 +248,22 @@ export function ExploreScreen() {
   }
 
   return (
-    <SafeAreaView style={[styles.safe, { backgroundColor: ui.bg }]} edges={['top']}>
+    <SafeAreaView style={styles.safe} edges={['top']}>
       <ScrollView
-        style={[styles.scroll, { backgroundColor: ui.bg }]}
+        style={styles.scroll}
         contentContainerStyle={styles.scrollContent}
         keyboardShouldPersistTaps="handled"
       >
-        <View style={[styles.header, { borderBottomColor: ui.border }]}>
-          <Text style={[styles.h1, { color: ui.text }]}>Explorar</Text>
+        <View style={styles.header}>
+          <Text style={styles.h1}>Explorar</Text>
 
           <View style={styles.searchRow}>
-            <View
-              style={[
-                styles.searchWrap,
-                { backgroundColor: ui.surfaceSoft, borderColor: ui.border },
-              ]}
-            >
+            <View style={styles.searchWrap}>
               <Text style={styles.searchIcon}>🔍</Text>
               <TextInput
-                style={[styles.searchInput, { color: ui.text }]}
+                style={styles.searchInput}
                 placeholder="Buscar partidos, canchas..."
-                placeholderTextColor={ui.muted}
+                placeholderTextColor={theme.textMuted}
                 value={searchQuery}
                 onChangeText={setSearchQuery}
               />
@@ -302,22 +273,20 @@ export function ExploreScreen() {
                   hitSlop={8}
                   style={styles.clearSearch}
                 >
-                  <Text style={[styles.clearSearchText, { color: ui.muted }]}>✕</Text>
+                  <Text style={styles.clearSearchText}>✕</Text>
                 </Pressable>
               ) : null}
             </View>
             <Pressable
-              style={[
-                styles.filterBtn,
-                { borderColor: ui.border, backgroundColor: ui.surface },
-                showFilters && styles.filterBtnOn,
-              ]}
+              style={[styles.filterBtn, showFilters && styles.filterBtnOn]}
               onPress={() => setShowFilters((s) => !s)}
             >
               <Text style={styles.filterBtnIcon}>⚙</Text>
               {activeFilterCount > 0 ? (
                 <View style={styles.filterBadge}>
-                  <Text style={styles.filterBadgeText}>{activeFilterCount}</Text>
+                  <Text style={styles.filterBadgeText}>
+                    {activeFilterCount}
+                  </Text>
                 </View>
               ) : null}
             </Pressable>
@@ -325,7 +294,7 @@ export function ExploreScreen() {
 
           {showFilters ? (
             <View style={styles.filtersPanel}>
-              <Text style={[styles.filterSectionLabel, { color: ui.muted }]}>
+              <Text style={styles.filterSectionLabel}>
                 Tipo de partido
               </Text>
               <View style={styles.chipRow}>
@@ -333,26 +302,29 @@ export function ExploreScreen() {
                   icon="🎯"
                   label="Rivales"
                   active={filters.types.includes('rival')}
-                  isDark={isDark}
+                  theme={theme}
+                  styles={styles}
                   onPress={() => toggleType('rival')}
                 />
                 <FilterChip
                   icon="👥"
                   label="Jugadores"
                   active={filters.types.includes('players')}
-                  isDark={isDark}
+                  theme={theme}
+                  styles={styles}
                   onPress={() => toggleType('players')}
                 />
                 <FilterChip
                   icon="🔀"
                   label="Revueltas"
                   active={filters.types.includes('open')}
-                  isDark={isDark}
+                  theme={theme}
+                  styles={styles}
                   onPress={() => toggleType('open')}
                 />
               </View>
 
-              <Text style={[styles.filterSectionLabel, { color: ui.muted }]}>Nivel</Text>
+              <Text style={styles.filterSectionLabel}>Nivel</Text>
               <View style={styles.chipRow}>
                 {(
                   [
@@ -375,7 +347,8 @@ export function ExploreScreen() {
                             : 'Competitivo'
                     }
                     active={filters.levels.includes(lvl)}
-                    isDark={isDark}
+                    theme={theme}
+                    styles={styles}
                     onPress={() => toggleLevel(lvl)}
                   />
                 ))}
@@ -383,7 +356,7 @@ export function ExploreScreen() {
 
               {activeFilterCount > 0 ? (
                 <Pressable onPress={clearFilters} style={styles.clearFiltersBtn}>
-                  <Text style={[styles.clearFiltersText, { color: ui.muted }]}>
+                  <Text style={styles.clearFiltersText}>
                     Limpiar filtros
                   </Text>
                 </Pressable>
@@ -393,8 +366,8 @@ export function ExploreScreen() {
         </View>
 
         {visibleVenues.length > 0 ? (
-          <View style={[styles.venuesSection, { borderBottomColor: ui.border }]}>
-            <Text style={[styles.venuesTitle, { color: ui.text }]}>
+          <View style={styles.venuesSection}>
+            <Text style={styles.venuesTitle}>
               🏢 Centros deportivos
             </Text>
             <ScrollView
@@ -405,16 +378,13 @@ export function ExploreScreen() {
               {visibleVenues.map((v) => (
                 <Pressable
                   key={v.id}
-                  style={[
-                    styles.venueCard,
-                    { borderColor: ui.border, backgroundColor: ui.surface },
-                  ]}
+                  style={styles.venueCard}
                   onPress={() => openVenue(v)}
                 >
-                  <Text style={[styles.venueName, { color: ui.text }]} numberOfLines={2}>
+                  <Text style={styles.venueName} numberOfLines={2}>
                     {v.name}
                   </Text>
-                  <Text style={[styles.venueCity, { color: ui.muted }]}>📍 {v.city}</Text>
+                  <Text style={styles.venueCity}>📍 {v.city}</Text>
                 </Pressable>
               ))}
             </ScrollView>
@@ -423,12 +393,12 @@ export function ExploreScreen() {
 
         <View style={styles.results}>
           <View style={styles.resultsHeader}>
-            <Text style={[styles.resultCount, { color: ui.muted }]}>
+            <Text style={styles.resultCount}>
               {filteredMatches.length}{' '}
               {filteredMatches.length === 1 ? 'resultado' : 'resultados'}
             </Text>
             {searchQuery.length > 0 ? (
-              <Text style={[styles.cityHint, { color: ui.muted }]}>📍 {cityHint}</Text>
+              <Text style={styles.cityHint}>📍 {cityHint}</Text>
             ) : null}
           </View>
 
@@ -441,7 +411,6 @@ export function ExploreScreen() {
                   isOwn={currentUser.id === match.creatorId}
                   isJoined={participatingOpportunityIds.includes(match.id)}
                   joining={joiningId === match.id}
-                  dark={isDark}
                   onViewDetails={() => router.push(`/partidos/${match.id}`)}
                   currentUserId={currentUser.id}
                   onShareRevuelta={() =>
@@ -462,11 +431,11 @@ export function ExploreScreen() {
           ) : (
             <View style={styles.empty}>
               <Text style={styles.emptyIcon}>🔍</Text>
-              <Text style={[styles.emptyText, { color: ui.muted }]}>
+              <Text style={styles.emptyText}>
                 No encontramos partidos con estos filtros
               </Text>
               <Pressable onPress={clearFilters}>
-                <Text style={[styles.emptyLink, { color: ui.accent }]}>
+                <Text style={styles.emptyLink}>
                   Limpiar filtros
                 </Text>
               </Pressable>
@@ -548,30 +517,34 @@ function FilterChip({
   icon,
   label,
   active,
-  isDark,
+  theme,
+  styles: s,
   onPress,
 }: {
   icon: string
   label: string
   active: boolean
-  isDark: boolean
+  theme: ReturnType<typeof useScreenTheme>
+  styles: ReturnType<typeof createExploreStyles>
   onPress: () => void
 }) {
-  const bg = isDark ? '#1a1f1d' : '#f3f4f6'
-  const border = isDark ? '#2C3131' : '#e5e7eb'
-  const text = isDark ? '#d1d5db' : '#4b5563'
   return (
     <Pressable
       onPress={onPress}
       style={[
-        styles.chip,
-        { backgroundColor: bg, borderColor: border },
-        active && styles.chipActive,
+        s.chip,
+        {
+          backgroundColor: active ? theme.primary : theme.chipBg,
+          borderColor: active ? theme.primary : theme.chipBorder,
+        },
       ]}
     >
-      <Text style={styles.chipIcon}>{icon}</Text>
+      <Text style={s.chipIcon}>{icon}</Text>
       <Text
-        style={[styles.chipLabel, { color: text }, active && styles.chipLabelActive]}
+        style={[
+          s.chipLabel,
+          { color: active ? theme.primaryBtnText : theme.text },
+        ]}
       >
         {label}
       </Text>
@@ -579,138 +552,154 @@ function FilterChip({
   )
 }
 
-const styles = StyleSheet.create({
-  safe: { flex: 1, backgroundColor: '#fff' },
-  scroll: { flex: 1 },
-  scrollContent: { paddingBottom: 32 },
-  header: {
-    paddingHorizontal: 16,
-    paddingTop: 8,
-    paddingBottom: 12,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: '#e5e7eb',
-  },
-  h1: { fontSize: 24, fontWeight: '800', color: '#111', marginBottom: 14 },
-  searchRow: { flexDirection: 'row', gap: 10, alignItems: 'center' },
-  searchWrap: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#f3f4f6',
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: '#e5e7eb',
-    paddingHorizontal: 12,
-    minHeight: 48,
-  },
-  searchIcon: { fontSize: 16, marginRight: 8 },
-  searchInput: {
-    flex: 1,
-    fontSize: 16,
-    color: '#111',
-    paddingVertical: 10,
-  },
-  clearSearch: { padding: 4 },
-  clearSearchText: { fontSize: 16, color: '#6b7280' },
-  filterBtn: {
-    position: 'relative',
-    width: 48,
-    height: 48,
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: '#e5e7eb',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  filterBtnOn: {
-    backgroundColor: 'rgba(37, 99, 235, 0.1)',
-    borderColor: '#2563eb',
-  },
-  filterBtnIcon: { fontSize: 20 },
-  filterBadge: {
-    position: 'absolute',
-    top: -4,
-    right: -4,
-    minWidth: 20,
-    height: 20,
-    borderRadius: 10,
-    backgroundColor: '#2563eb',
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingHorizontal: 4,
-  },
-  filterBadgeText: { color: '#fff', fontSize: 11, fontWeight: '700' },
-  filtersPanel: { marginTop: 16, gap: 12 },
-  filterSectionLabel: {
-    fontSize: 13,
-    fontWeight: '600',
-    color: '#6b7280',
-  },
-  chipRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
-  chip: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    borderRadius: 999,
-    borderWidth: 1,
-    borderColor: '#e5e7eb',
-    backgroundColor: '#f3f4f6',
-  },
-  chipActive: {
-    backgroundColor: '#2563eb',
-    borderColor: '#2563eb',
-  },
-  chipIcon: { fontSize: 14 },
-  chipLabel: { fontSize: 14, color: '#4b5563' },
-  chipLabelActive: { color: '#fff', fontWeight: '600' },
-  clearFiltersBtn: { alignSelf: 'flex-start', paddingVertical: 8 },
-  clearFiltersText: { fontSize: 14, color: '#6b7280' },
-  venuesSection: {
-    paddingTop: 12,
-    paddingBottom: 8,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: '#e5e7eb',
-  },
-  venuesTitle: {
-    fontSize: 14,
-    fontWeight: '700',
-    color: '#111',
-    paddingHorizontal: 16,
-    marginBottom: 10,
-  },
-  venuesScroll: { paddingHorizontal: 12, gap: 10, paddingBottom: 8 },
-  venueCard: {
-    width: 200,
-    padding: 12,
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: '#e5e7eb',
-    backgroundColor: '#fff',
-    marginHorizontal: 4,
-  },
-  venueName: { fontSize: 14, fontWeight: '600', color: '#111' },
-  venueCity: { fontSize: 12, color: '#6b7280', marginTop: 6 },
-  results: { padding: 16 },
-  resultsHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 14,
-  },
-  resultCount: { fontSize: 14, color: '#6b7280' },
-  cityHint: { fontSize: 14, color: '#6b7280' },
-  cards: { gap: 14 },
-  empty: { alignItems: 'center', paddingVertical: 48 },
-  emptyIcon: { fontSize: 40, marginBottom: 12 },
-  emptyText: { fontSize: 15, color: '#6b7280', textAlign: 'center' },
-  emptyLink: {
-    marginTop: 12,
-    fontSize: 15,
-    fontWeight: '600',
-    color: '#2563eb',
-  },
-  gate: { flex: 1, justifyContent: 'center', padding: 24 },
-  gateText: { fontSize: 15, color: '#6b7280', textAlign: 'center' },
-})
+function createExploreStyles(theme: ReturnType<typeof useScreenTheme>) {
+  const filterBtnOnBg = theme.isDark
+    ? theme.selectedTint
+    : 'rgba(37, 99, 235, 0.1)'
+  return StyleSheet.create({
+    safe: { flex: 1, backgroundColor: theme.bg },
+    scroll: { flex: 1, backgroundColor: theme.bg },
+    scrollContent: { paddingBottom: 32 },
+    header: {
+      paddingHorizontal: 16,
+      paddingTop: 8,
+      paddingBottom: 12,
+      borderBottomWidth: StyleSheet.hairlineWidth,
+      borderBottomColor: theme.border,
+    },
+    h1: {
+      fontSize: 24,
+      fontWeight: '800',
+      color: theme.text,
+      marginBottom: 14,
+    },
+    searchRow: { flexDirection: 'row', gap: 10, alignItems: 'center' },
+    searchWrap: {
+      flex: 1,
+      flexDirection: 'row',
+      alignItems: 'center',
+      backgroundColor: theme.chipBg,
+      borderRadius: 12,
+      borderWidth: 1,
+      borderColor: theme.border,
+      paddingHorizontal: 12,
+      minHeight: 48,
+    },
+    searchIcon: { fontSize: 16, marginRight: 8 },
+    searchInput: {
+      flex: 1,
+      fontSize: 16,
+      color: theme.text,
+      paddingVertical: 10,
+    },
+    clearSearch: { padding: 4 },
+    clearSearchText: { fontSize: 16, color: theme.textMuted },
+    filterBtn: {
+      position: 'relative',
+      width: 48,
+      height: 48,
+      borderRadius: 12,
+      borderWidth: 1,
+      borderColor: theme.border,
+      backgroundColor: theme.card,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    filterBtnOn: {
+      backgroundColor: filterBtnOnBg,
+      borderColor: theme.primary,
+    },
+    filterBtnIcon: { fontSize: 20 },
+    filterBadge: {
+      position: 'absolute',
+      top: -4,
+      right: -4,
+      minWidth: 20,
+      height: 20,
+      borderRadius: 10,
+      backgroundColor: theme.primary,
+      alignItems: 'center',
+      justifyContent: 'center',
+      paddingHorizontal: 4,
+    },
+    filterBadgeText: {
+      color: theme.primaryBtnText,
+      fontSize: 11,
+      fontWeight: '700',
+    },
+    filtersPanel: { marginTop: 16, gap: 12 },
+    filterSectionLabel: {
+      fontSize: 13,
+      fontWeight: '600',
+      color: theme.textMuted,
+    },
+    chipRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+    chip: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 6,
+      paddingHorizontal: 12,
+      paddingVertical: 8,
+      borderRadius: 999,
+      borderWidth: 1,
+    },
+    chipIcon: { fontSize: 14 },
+    chipLabel: { fontSize: 14 },
+    clearFiltersBtn: { alignSelf: 'flex-start', paddingVertical: 8 },
+    clearFiltersText: { fontSize: 14, color: theme.textMuted },
+    venuesSection: {
+      paddingTop: 12,
+      paddingBottom: 8,
+      borderBottomWidth: StyleSheet.hairlineWidth,
+      borderBottomColor: theme.border,
+    },
+    venuesTitle: {
+      fontSize: 14,
+      fontWeight: '700',
+      color: theme.text,
+      paddingHorizontal: 16,
+      marginBottom: 10,
+    },
+    venuesScroll: { paddingHorizontal: 12, gap: 10, paddingBottom: 8 },
+    venueCard: {
+      width: 200,
+      padding: 12,
+      borderRadius: 12,
+      borderWidth: 1,
+      borderColor: theme.border,
+      backgroundColor: theme.card,
+      marginHorizontal: 4,
+    },
+    venueName: { fontSize: 14, fontWeight: '600', color: theme.text },
+    venueCity: { fontSize: 12, color: theme.textMuted, marginTop: 6 },
+    results: { padding: 16 },
+    resultsHeader: {
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+      alignItems: 'center',
+      marginBottom: 14,
+    },
+    resultCount: { fontSize: 14, color: theme.textMuted },
+    cityHint: { fontSize: 14, color: theme.textMuted },
+    cards: { gap: 14 },
+    empty: { alignItems: 'center', paddingVertical: 48 },
+    emptyIcon: { fontSize: 40, marginBottom: 12 },
+    emptyText: {
+      fontSize: 15,
+      color: theme.textMuted,
+      textAlign: 'center',
+    },
+    emptyLink: {
+      marginTop: 12,
+      fontSize: 15,
+      fontWeight: '600',
+      color: theme.link,
+    },
+    gate: { flex: 1, justifyContent: 'center', padding: 24 },
+    gateText: {
+      fontSize: 15,
+      color: theme.textMuted,
+      textAlign: 'center',
+    },
+  })
+}

@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import {
   ActivityIndicator,
   Alert,
@@ -24,6 +24,7 @@ import {
   isRatingWindowOpen,
   type MatchOpportunityRatingRow,
 } from '../lib/supabase/rating-queries'
+import { useScreenTheme } from '../lib/theme-ui'
 
 const SUSPEND_PRESET_REASONS = [
   'Mal tiempo o lluvia',
@@ -38,29 +39,26 @@ function StarRow({
   value,
   onChange,
   disabled,
+  styles: s,
 }: {
   label: string
   value: number
   onChange: (n: number) => void
   disabled?: boolean
+  styles: ReturnType<typeof createCompletionStyles>
 }) {
   return (
-    <View style={styles.starBlock}>
-      <Text style={styles.starLabel}>{label}</Text>
-      <View style={styles.starRow}>
+    <View style={s.starBlock}>
+      <Text style={s.starLabel}>{label}</Text>
+      <View style={s.starRow}>
         {[1, 2, 3, 4, 5].map((n) => (
           <Pressable
             key={n}
             disabled={disabled}
             onPress={() => onChange(n)}
-            style={[
-              styles.starBtn,
-              value >= n ? styles.starBtnOn : styles.starBtnOff,
-            ]}
+            style={[s.starBtn, value >= n ? s.starBtnOn : s.starBtnOff]}
           >
-            <Text style={[styles.starGlyph, value >= n && styles.starGlyphOn]}>
-              ★
-            </Text>
+            <Text style={[s.starGlyph, value >= n && s.starGlyphOn]}>★</Text>
           </Pressable>
         ))}
       </View>
@@ -108,6 +106,8 @@ export function MatchCompletionPanel({
   suspendMatchOpportunity,
   submitMatchRating,
 }: Props) {
+  const theme = useScreenTheme()
+  const styles = useMemo(() => createCompletionStyles(theme), [theme])
   const isCreator = opportunity.creatorId === currentUserId
   const completed = opportunity.status === 'completed'
   const needsResolveAfterMidnight = (() => {
@@ -389,7 +389,7 @@ export function MatchCompletionPanel({
             onPress={() => void handleFinalize()}
           >
             {finalizing ? (
-              <ActivityIndicator color="#fff" />
+              <ActivityIndicator color={theme.primaryBtnText} />
             ) : (
               <Text style={styles.primaryBtnText}>Marcar partido como finalizado</Text>
             )}
@@ -461,7 +461,7 @@ export function MatchCompletionPanel({
                       value={suspendOtherText}
                       onChangeText={setSuspendOtherText}
                       placeholder="Describe el motivo…"
-                      placeholderTextColor="#9ca3af"
+                      placeholderTextColor={theme.textMuted}
                       multiline
                       maxLength={1000}
                       editable={!suspending}
@@ -488,7 +488,7 @@ export function MatchCompletionPanel({
                     onPress={() => void handleSuspend()}
                   >
                     {suspending ? (
-                      <ActivityIndicator color="#b91c1c" />
+                      <ActivityIndicator color={theme.danger} />
                     ) : (
                       <Text style={styles.dangerOutlineText}>
                         Confirmar suspensión
@@ -534,6 +534,7 @@ export function MatchCompletionPanel({
               value={orgStars}
               onChange={setOrgStars}
               disabled={submitting}
+              styles={styles}
             />
           )}
           <StarRow
@@ -541,12 +542,14 @@ export function MatchCompletionPanel({
             value={matchStars}
             onChange={setMatchStars}
             disabled={submitting}
+            styles={styles}
           />
           <StarRow
             label="Nivel del partido vs lo anunciado"
             value={levelStars}
             onChange={setLevelStars}
             disabled={submitting}
+            styles={styles}
           />
           <Text style={styles.inputLabel}>Comentario (opcional)</Text>
           <TextInput
@@ -554,7 +557,7 @@ export function MatchCompletionPanel({
             value={comment}
             onChangeText={setComment}
             placeholder="Breve opinión sobre el partido…"
-            placeholderTextColor="#9ca3af"
+            placeholderTextColor={theme.textMuted}
             multiline
             maxLength={2000}
             editable={!submitting}
@@ -577,7 +580,7 @@ export function MatchCompletionPanel({
             onPress={() => void handleSubmitRating()}
           >
             {submitting ? (
-              <ActivityIndicator color="#fff" />
+              <ActivityIndicator color={theme.primaryBtnText} />
             ) : (
               <Text style={styles.primaryBtnText}>Enviar calificación</Text>
             )}
@@ -599,146 +602,156 @@ export function MatchCompletionPanel({
   )
 }
 
-const styles = StyleSheet.create({
-  wrap: {
-    borderTopWidth: StyleSheet.hairlineWidth,
-    borderColor: '#e5e7eb',
-    backgroundColor: '#f9fafb',
-    paddingHorizontal: 16,
-    paddingVertical: 14,
-    gap: 12,
-  },
-  warnBox: {
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: 'rgba(245, 158, 11, 0.45)',
-    backgroundColor: 'rgba(245, 158, 11, 0.12)',
-    padding: 12,
-    gap: 4,
-  },
-  warnTitle: { fontSize: 15, fontWeight: '700', color: '#111' },
-  warnBody: { fontSize: 13, color: '#57534e', lineHeight: 18 },
-  section: { gap: 10 },
-  sectionTitle: { fontSize: 15, fontWeight: '700', color: '#111' },
-  hint: { fontSize: 12, color: '#6b7280', lineHeight: 17 },
-  radioBlock: { gap: 8 },
-  radioLabel: { fontSize: 12, color: '#6b7280', marginBottom: 2 },
-  radioRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-    padding: 10,
-    borderRadius: 10,
-    borderWidth: 1,
-    borderColor: '#e5e7eb',
-    backgroundColor: '#fff',
-  },
-  radioRowSelected: {
-    borderColor: '#2563eb',
-    backgroundColor: 'rgba(37, 99, 235, 0.08)',
-  },
-  radioDot: {
-    width: 18,
-    height: 18,
-    borderRadius: 9,
-    borderWidth: 2,
-    borderColor: '#9ca3af',
-  },
-  radioDotOn: { borderColor: '#2563eb', backgroundColor: '#2563eb' },
-  radioText: { flex: 1, fontSize: 14, color: '#374151' },
-  primaryBtn: {
-    backgroundColor: '#2563eb',
-    borderRadius: 12,
-    paddingVertical: 14,
-    alignItems: 'center',
-    marginTop: 4,
-  },
-  primaryBtnText: { color: '#fff', fontSize: 16, fontWeight: '700' },
-  btnDisabled: { opacity: 0.55 },
-  suspendDivider: {
-    marginTop: 12,
-    paddingTop: 12,
-    borderTopWidth: StyleSheet.hairlineWidth,
-    borderColor: '#e5e7eb',
-    gap: 8,
-  },
-  suspendToggle: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    backgroundColor: '#b91c1c',
-    borderRadius: 12,
-    paddingVertical: 12,
-    paddingHorizontal: 14,
-  },
-  suspendToggleText: { color: '#fff', fontWeight: '700', fontSize: 15 },
-  chevron: { color: '#fff', fontSize: 14 },
-  suspendInner: {
-    gap: 8,
-    borderRadius: 10,
-    borderWidth: 1,
-    borderColor: '#e5e7eb',
-    backgroundColor: '#fff',
-    padding: 12,
-  },
-  subLabel: { fontSize: 12, fontWeight: '600', color: '#111' },
-  textArea: {
-    borderWidth: 1,
-    borderColor: '#e5e7eb',
-    borderRadius: 10,
-    padding: 10,
-    minHeight: 72,
-    fontSize: 14,
-    color: '#111',
-    textAlignVertical: 'top',
-    backgroundColor: '#fafafa',
-  },
-  miniHint: { fontSize: 11, color: '#6b7280' },
-  suspendActions: {
-    flexDirection: 'row',
-    justifyContent: 'flex-end',
-    alignItems: 'center',
-    gap: 16,
-    marginTop: 8,
-  },
-  ghostText: { color: '#6b7280', fontSize: 14 },
-  dangerOutlineBtn: {
-    borderWidth: 1,
-    borderColor: 'rgba(185, 28, 28, 0.5)',
-    borderRadius: 10,
-    paddingVertical: 10,
-    paddingHorizontal: 16,
-    minWidth: 160,
-    alignItems: 'center',
-  },
-  dangerOutlineText: { color: '#b91c1c', fontWeight: '600', fontSize: 14 },
-  doneBadge: {
-    fontSize: 11,
-    fontWeight: '700',
-    color: '#2563eb',
-    letterSpacing: 0.5,
-    textTransform: 'uppercase',
-  },
-  outcomeLine: { fontSize: 14, color: '#4b5563', marginTop: 4 },
-  deadlineHint: { fontSize: 12, color: '#6b7280' },
-  mutedSmall: { fontSize: 12, color: '#6b7280' },
-  thanks: { fontSize: 14, color: '#2563eb', fontWeight: '600' },
-  starBlock: { gap: 6 },
-  starLabel: { fontSize: 14, color: '#374151' },
-  starRow: { flexDirection: 'row', gap: 6 },
-  starBtn: {
-    padding: 8,
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: '#e5e7eb',
-    backgroundColor: '#fff',
-  },
-  starBtnOn: {
-    borderColor: 'rgba(37, 99, 235, 0.45)',
-    backgroundColor: 'rgba(37, 99, 235, 0.1)',
-  },
-  starBtnOff: {},
-  starGlyph: { fontSize: 22, color: '#9ca3af' },
-  starGlyphOn: { color: '#2563eb' },
-  inputLabel: { fontSize: 14, color: '#374151', marginTop: 4 },
-})
+function createCompletionStyles(theme: ReturnType<typeof useScreenTheme>) {
+  return StyleSheet.create({
+    wrap: {
+      borderTopWidth: StyleSheet.hairlineWidth,
+      borderColor: theme.border,
+      backgroundColor: theme.isDark ? theme.card : theme.chipBg,
+      paddingHorizontal: 16,
+      paddingVertical: 14,
+      gap: 12,
+    },
+    warnBox: {
+      borderRadius: 12,
+      borderWidth: 1,
+      borderColor: 'rgba(245, 158, 11, 0.45)',
+      backgroundColor: 'rgba(245, 158, 11, 0.12)',
+      padding: 12,
+      gap: 4,
+    },
+    warnTitle: { fontSize: 15, fontWeight: '700', color: theme.text },
+    warnBody: { fontSize: 13, color: theme.textMuted, lineHeight: 18 },
+    section: { gap: 10 },
+    sectionTitle: { fontSize: 15, fontWeight: '700', color: theme.text },
+    hint: { fontSize: 12, color: theme.textMuted, lineHeight: 17 },
+    radioBlock: { gap: 8 },
+    radioLabel: { fontSize: 12, color: theme.textMuted, marginBottom: 2 },
+    radioRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 10,
+      padding: 10,
+      borderRadius: 10,
+      borderWidth: 1,
+      borderColor: theme.border,
+      backgroundColor: theme.card,
+    },
+    radioRowSelected: {
+      borderColor: theme.primary,
+      backgroundColor: theme.selectedTint,
+    },
+    radioDot: {
+      width: 18,
+      height: 18,
+      borderRadius: 9,
+      borderWidth: 2,
+      borderColor: theme.textMuted,
+    },
+    radioDotOn: { borderColor: theme.primary, backgroundColor: theme.primary },
+    radioText: { flex: 1, fontSize: 14, color: theme.text },
+    primaryBtn: {
+      backgroundColor: theme.primary,
+      borderRadius: 12,
+      paddingVertical: 14,
+      alignItems: 'center',
+      marginTop: 4,
+    },
+    primaryBtnText: {
+      color: theme.primaryBtnText,
+      fontSize: 16,
+      fontWeight: '700',
+    },
+    btnDisabled: { opacity: 0.55 },
+    suspendDivider: {
+      marginTop: 12,
+      paddingTop: 12,
+      borderTopWidth: StyleSheet.hairlineWidth,
+      borderColor: theme.border,
+      gap: 8,
+    },
+    suspendToggle: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      backgroundColor: theme.danger,
+      borderRadius: 12,
+      paddingVertical: 12,
+      paddingHorizontal: 14,
+    },
+    suspendToggleText: {
+      color: theme.primaryBtnText,
+      fontWeight: '700',
+      fontSize: 15,
+    },
+    chevron: { color: theme.primaryBtnText, fontSize: 14 },
+    suspendInner: {
+      gap: 8,
+      borderRadius: 10,
+      borderWidth: 1,
+      borderColor: theme.border,
+      backgroundColor: theme.card,
+      padding: 12,
+    },
+    subLabel: { fontSize: 12, fontWeight: '600', color: theme.text },
+    textArea: {
+      borderWidth: 1,
+      borderColor: theme.inputBorder,
+      borderRadius: 10,
+      padding: 10,
+      minHeight: 72,
+      fontSize: 14,
+      color: theme.text,
+      textAlignVertical: 'top',
+      backgroundColor: theme.inputBg,
+    },
+    miniHint: { fontSize: 11, color: theme.textMuted },
+    suspendActions: {
+      flexDirection: 'row',
+      justifyContent: 'flex-end',
+      alignItems: 'center',
+      gap: 16,
+      marginTop: 8,
+    },
+    ghostText: { color: theme.textMuted, fontSize: 14 },
+    dangerOutlineBtn: {
+      borderWidth: 1,
+      borderColor: 'rgba(185, 28, 28, 0.5)',
+      borderRadius: 10,
+      paddingVertical: 10,
+      paddingHorizontal: 16,
+      minWidth: 160,
+      alignItems: 'center',
+    },
+    dangerOutlineText: { color: theme.danger, fontWeight: '600', fontSize: 14 },
+    doneBadge: {
+      fontSize: 11,
+      fontWeight: '700',
+      color: theme.primary,
+      letterSpacing: 0.5,
+      textTransform: 'uppercase',
+    },
+    outcomeLine: { fontSize: 14, color: theme.textMuted, marginTop: 4 },
+    deadlineHint: { fontSize: 12, color: theme.textMuted },
+    mutedSmall: { fontSize: 12, color: theme.textMuted },
+    thanks: { fontSize: 14, color: theme.primary, fontWeight: '600' },
+    starBlock: { gap: 6 },
+    starLabel: { fontSize: 14, color: theme.text },
+    starRow: { flexDirection: 'row', gap: 6 },
+    starBtn: {
+      padding: 8,
+      borderRadius: 8,
+      borderWidth: 1,
+      borderColor: theme.border,
+      backgroundColor: theme.card,
+    },
+    starBtnOn: {
+      borderColor: theme.primary,
+      backgroundColor: theme.selectedTint,
+    },
+    starBtnOff: {},
+    starGlyph: { fontSize: 22, color: theme.textMuted },
+    starGlyphOn: { color: theme.primary },
+    inputLabel: { fontSize: 14, color: theme.text, marginTop: 4 },
+  })
+}

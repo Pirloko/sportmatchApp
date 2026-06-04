@@ -39,8 +39,9 @@ export function formatMatchDateTime(d: Date): string {
 export function matchTypeLabel(t: MatchType): string {
   if (t === 'rival') return 'Rival'
   if (t === 'players') return 'Busca jugadores'
-  if (t === 'team_pick' || t === 'team_pick_public' || t === 'team_pick_private') {
-    return 'Team pick'
+  if (t === 'team_pick_private') return 'Selección privada'
+  if (t === 'team_pick' || t === 'team_pick_public') {
+    return 'Selección de equipos'
   }
   return 'Revuelta'
 }

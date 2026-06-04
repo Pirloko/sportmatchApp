@@ -7,6 +7,8 @@ import { Platform } from 'react-native'
 
 const storageKey = 'pichanga-auth'
 
+let supabaseSingleton: SupabaseClient | null = null
+
 /** Quita comillas típicas si alguien pegó el .env con "..." */
 function stripEnvQuotes(raw: string): string {
   const t = raw.trim()
@@ -23,7 +25,6 @@ function normalizeSupabaseProjectUrl(url: string): string {
   const t = stripEnvQuotes(url.trim())
   if (!t) return ''
   if (/^https?:\/\//i.test(t)) return t
-  // Ej: xxx.supabase.co sin protocolo
   if (/^[a-z0-9][\w.-]*\.supabase\.co\/?$/i.test(t)) {
     return `https://${t.replace(/\/$/, '')}`
   }
@@ -60,11 +61,7 @@ export function isSupabaseConfigured(): boolean {
   return isValidHttpUrl(url) && key.length >= 20
 }
 
-/**
- * Cliente Supabase para Expo (nativo + web): sesión en AsyncStorage,
- * mismo storageKey que la web para coherencia si compartes builds de prueba.
- */
-export function createClient(): SupabaseClient {
+function buildSupabaseClient(): SupabaseClient {
   const url = resolvedUrl()
   const key = resolvedAnonKey()
   if (!isValidHttpUrl(url) || !key) {
@@ -80,11 +77,32 @@ export function createClient(): SupabaseClient {
       detectSessionInUrl: Platform.OS === 'web',
       storageKey,
       /**
-       * En iOS/Android el flujo implícito con hash en deep link falla a menudo; PKCE + code en query
-       * es el patrón recomendado para OAuth nativo (docs Supabase).
-       * La web sigue en implicit (comportamiento actual en producción).
+       * Web: implicit (producción React). Nativo: PKCE + S256 (polyfill en polyfills.ts).
        */
       flowType: Platform.OS === 'web' ? 'implicit' : 'pkce',
     },
   })
+}
+
+/**
+ * Instancia única de Supabase para toda la app (evita carreras en PKCE / sesión).
+ */
+export function getSupabase(): SupabaseClient {
+  if (!supabaseSingleton) {
+    supabaseSingleton = buildSupabaseClient()
+  }
+  return supabaseSingleton
+}
+
+/** null si faltan variables de entorno (pantallas de configuración). */
+export function getSupabaseOrNull(): SupabaseClient | null {
+  if (!isSupabaseConfigured()) return null
+  return getSupabase()
+}
+
+/**
+ * @deprecated Usar getSupabase() / getSupabaseOrNull().
+ */
+export function createClient(): SupabaseClient {
+  return getSupabase()
 }

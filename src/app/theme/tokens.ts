@@ -81,15 +81,16 @@ const darkSemantic: SemanticPalette = {
   background: '#0F1115',
   foreground: '#FAFAFA',
   card: '#1A1D23',
-  primary: '#0F4539',
+  /** Verde accesible en fondos oscuros (botones, tabs, links). */
+  primary: '#66D06F',
   secondary: '#2A2E35',
   muted: '#333840',
   mutedForeground: '#9CA3AF',
   accent: '#F59E0B',
-  destructive: '#EF4444',
+  destructive: '#F87171',
   border: '#3B4049',
   warning: '#FACC15',
-  success: '#22C55E',
+  success: '#4ADE80',
 }
 
 export const themeTokens = {

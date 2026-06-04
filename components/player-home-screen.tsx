@@ -1,6 +1,6 @@
 import { Ionicons } from '@expo/vector-icons'
-import { router } from 'expo-router'
-import { useMemo, useRef, useState } from 'react'
+import { router, useFocusEffect } from 'expo-router'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   Alert,
   Image,
@@ -22,7 +22,10 @@ import { RivalTeamPickerModal } from './rival-team-picker-modal'
 import { alertJoinResult } from '../lib/alert-join-result'
 import { startOfToday } from '../lib/format-match'
 import { useApp } from '../lib/app-provider'
+import { useUnreadNotificationsCount } from '../lib/hooks/use-unread-notifications'
 import { useThemePreference } from '../lib/theme-context'
+import { getSupabase, isSupabaseConfigured } from '../lib/supabase/client'
+import { fetchGeoCities, type GeoCity } from '../lib/supabase/geo-queries'
 import { DEFAULT_AVATAR } from '../lib/supabase/mappers'
 import type { MatchOpportunity, MatchType } from '../lib/types'
 
@@ -52,7 +55,6 @@ export function PlayerHomeScreen() {
     joinMatchOpportunity,
     acceptRivalOpportunityWithTeam,
     participatingOpportunityIds,
-    openProfileEditor,
     resolveTeamPickPrivateJoinCode,
   } = useApp()
 
@@ -71,8 +73,11 @@ export function PlayerHomeScreen() {
   const [activeFilter, setActiveFilter] = useState<FilterType>('all')
   const [teamPrivateCode, setTeamPrivateCode] = useState('')
   const [selectedCity, setSelectedCity] = useState<string | null>(null)
+  const [regionCities, setRegionCities] = useState<GeoCity[]>([])
   const privateCodeInputRef = useRef<TextInput | null>(null)
   const { resolved, setPreference } = useThemePreference()
+  const { count: unreadNotifications, refresh: refreshUnreadNotifications } =
+    useUnreadNotificationsCount(currentUser?.id)
   const isDark = resolved === 'dark'
   const ui = isDark
     ? {
@@ -101,15 +106,63 @@ export function PlayerHomeScreen() {
   const midnight = useMemo(() => startOfToday(), [])
   const userCityNormalized = normalizeLocation(currentUser?.city)
 
+  useEffect(() => {
+    let cancelled = false
+    void (async () => {
+      const regionId = currentUser?.homeRegionId
+      if (!regionId || !isSupabaseConfigured()) {
+        if (!cancelled) setRegionCities([])
+        return
+      }
+      const cities = await fetchGeoCities(getSupabase(), regionId)
+      if (!cancelled) setRegionCities(cities)
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [currentUser?.homeRegionId])
+
+  useEffect(() => {
+    setSelectedCity(null)
+  }, [currentUser?.homeRegionId])
+
+  useFocusEffect(
+    useCallback(() => {
+      void refreshUnreadNotifications()
+    }, [refreshUnreadNotifications])
+  )
+
+  const regionCityNamesNormalized = useMemo(
+    () => new Set(regionCities.map((c) => normalizeLocation(c.name))),
+    [regionCities]
+  )
+
+  const cityOptions = useMemo(
+    () => regionCities.map((c) => c.name).sort((a, b) => a.localeCompare(b, 'es')),
+    [regionCities]
+  )
+
   const matches = useMemo(() => {
     if (!currentUser) return []
-    return getFilteredMatches(currentUser.gender).filter(
-      (m) =>
-        (m.status === 'pending' || m.status === 'confirmed') &&
-        (userCityNormalized === '' ||
-          normalizeLocation(m.location) === userCityNormalized)
+    const base = getFilteredMatches(currentUser.gender).filter(
+      (m) => m.status === 'pending' || m.status === 'confirmed'
     )
-  }, [currentUser, getFilteredMatches, userCityNormalized])
+    if (regionCityNamesNormalized.size > 0) {
+      return base.filter((m) =>
+        regionCityNamesNormalized.has(normalizeLocation(m.location))
+      )
+    }
+    return base.filter(
+      (m) =>
+        userCityNormalized === '' ||
+        normalizeLocation(m.location) === userCityNormalized
+    )
+  }, [
+    currentUser,
+    getFilteredMatches,
+    regionCityNamesNormalized,
+    userCityNormalized,
+  ])
 
   const visibleMatches = useMemo(
     () => matches.filter((m) => m.dateTime.getTime() >= midnight.getTime()),
@@ -124,19 +177,11 @@ export function PlayerHomeScreen() {
     return visibleMatches.filter((m) => m.type === activeFilter)
   }, [visibleMatches, activeFilter])
 
-  const cityOptions = useMemo(() => {
-    const set = new Set<string>()
-    for (const m of visibleMatches) {
-      const c = m.location?.trim()
-      if (c) set.add(c)
-    }
-    return [...set].sort((a, b) => a.localeCompare(b))
-  }, [visibleMatches])
-
   const listMatches = useMemo(() => {
     if (!selectedCity) return filteredMatches
+    const norm = normalizeLocation(selectedCity)
     return filteredMatches.filter(
-      (m) => m.location?.trim() === selectedCity
+      (m) => normalizeLocation(m.location) === norm
     )
   }, [filteredMatches, selectedCity])
 
@@ -190,11 +235,6 @@ export function PlayerHomeScreen() {
     }
 
     if (isTeamPickType(type)) {
-      if (getUserTeams().length === 0) {
-        Alert.alert('Equipo requerido', 'Para team pick debes pertenecer a un equipo.')
-        router.push('/equipos')
-        return
-      }
       const m = listMatches.find((x) => x.id === opportunityId)
       if (m) {
         setTeamPickInitialCode('')
@@ -247,7 +287,7 @@ export function PlayerHomeScreen() {
       Alert.alert(
         'Sin coincidencia',
         resolvedCode.error ??
-          'No encontramos un partido team pick con ese código en tus oportunidades. Revisa en Explorar o pide el enlace al organizador.'
+          'No encontramos un partido de selección de equipos con ese código. Revisa en Explorar o pide el enlace al organizador.'
       )
     })()
   }
@@ -272,7 +312,12 @@ export function PlayerHomeScreen() {
                 { backgroundColor: ui.card, borderColor: ui.cardBorder },
               ]}
             >
-              <Ionicons name="football" size={18} color="#0F4539" />
+              <Image
+                source={require('../assets/sportmatch-logo.png')}
+                style={styles.brandLogo}
+                resizeMode="contain"
+                accessibilityLabel="SportMatch"
+              />
             </View>
             <View>
               <Text style={[styles.h1, { color: ui.text }]}>Hola, {firstName}</Text>
@@ -295,13 +340,32 @@ export function PlayerHomeScreen() {
             </Pressable>
             <Pressable
               style={styles.iconBtn}
-              onPress={() => router.push('/partidos?tab=chats')}
-              accessibilityLabel="Ir a chats de partidos"
+              onPress={() => router.push('/notificaciones')}
+              accessibilityLabel="Notificaciones"
             >
               <Ionicons name="notifications-outline" size={22} color={ui.icon} />
-              <View style={styles.bellDot} />
+              {unreadNotifications > 0 ? (
+                <View
+                  style={[
+                    styles.bellBadge,
+                    { backgroundColor: isDark ? '#66D06F' : '#0F4539' },
+                  ]}
+                >
+                  <Text
+                    style={[
+                      styles.bellBadgeText,
+                      { color: isDark ? '#0F1115' : '#FFFFFF' },
+                    ]}
+                  >
+                    {unreadNotifications > 9 ? '9+' : String(unreadNotifications)}
+                  </Text>
+                </View>
+              ) : null}
             </Pressable>
-            <Pressable onPress={openProfileEditor} accessibilityLabel="Perfil">
+            <Pressable
+              onPress={() => router.push('/perfil')}
+              accessibilityLabel="Ir a perfil"
+            >
               <Image source={{ uri: avatarUri }} style={styles.headerAvatar} />
             </Pressable>
           </View>
@@ -398,9 +462,6 @@ export function PlayerHomeScreen() {
 
         <View style={styles.feedHeader}>
           <Text style={[styles.feedTitle, { color: ui.text }]}>Oportunidades cerca</Text>
-          <Pressable onPress={() => router.push('/explorar')}>
-            <Text style={[styles.feedLink, { color: ui.sectionLink }]}>Ver todas →</Text>
-          </Pressable>
         </View>
 
         <Pressable
@@ -441,7 +502,6 @@ export function PlayerHomeScreen() {
               <HomeMatchCard
                 key={match.id}
                 match={match}
-                dark={isDark}
                 isOwn={currentUser?.id === match.creatorId}
                 isJoined={participatingOpportunityIds.includes(match.id)}
                 joining={joiningId === match.id}
@@ -634,6 +694,11 @@ const styles = StyleSheet.create({
     borderColor: '#2C3131',
     alignItems: 'center',
     justifyContent: 'center',
+    overflow: 'hidden',
+  },
+  brandLogo: {
+    width: 36,
+    height: 36,
   },
   h1: { fontSize: 20, fontWeight: '800', color: '#F5F7F7' },
   sub: { fontSize: 13, color: '#9CA3A3', marginTop: 3 },
@@ -645,14 +710,20 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  bellDot: {
+  bellBadge: {
     position: 'absolute',
-    top: 8,
-    right: 8,
-    width: 7,
-    height: 7,
-    borderRadius: 4,
-    backgroundColor: '#0F4539',
+    top: 4,
+    right: 4,
+    minWidth: 18,
+    height: 18,
+    paddingHorizontal: 4,
+    borderRadius: 9,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  bellBadgeText: {
+    fontSize: 10,
+    fontWeight: '800',
   },
   headerAvatar: {
     width: 40,
@@ -753,14 +824,10 @@ const styles = StyleSheet.create({
   bannerTitle: { fontSize: 16, fontWeight: '700', color: '#F5F7F7' },
   bannerSub: { fontSize: 13, color: '#9CA3A3', marginTop: 2 },
   feedHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
     paddingHorizontal: 16,
     marginBottom: 8,
   },
   feedTitle: { fontSize: 17, fontWeight: '800', color: '#F5F7F7' },
-  feedLink: { fontSize: 14, fontWeight: '600', color: '#86efac' },
   cityRow: {
     marginHorizontal: 16,
     marginBottom: 14,

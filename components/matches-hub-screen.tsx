@@ -2,14 +2,15 @@ import { router, useLocalSearchParams } from 'expo-router'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import {
   Alert,
+  FlatList,
   Pressable,
   RefreshControl,
   StyleSheet,
   Text,
   View,
+  type ListRenderItem,
 } from 'react-native'
 import { Ionicons } from '@expo/vector-icons'
-import { FlashList, type ListRenderItem } from '@shopify/flash-list'
 import { SafeAreaView } from 'react-native-safe-area-context'
 
 import {
@@ -18,10 +19,10 @@ import {
   matchTypeLabel,
   startOfToday,
 } from '../lib/format-match'
-import type { MatchOpportunity } from '../lib/types'
+import type { Level, MatchOpportunity, MatchType } from '../lib/types'
 import { useApp } from '../lib/app-provider'
 import { useThemePreference } from '../lib/theme-context'
-import { createClient, isSupabaseConfigured } from '../lib/supabase/client'
+import { getSupabase, isSupabaseConfigured } from '../lib/supabase/client'
 import {
   fetchInvitedOpportunityIds,
   fetchLastMessagesForOpportunities,
@@ -34,6 +35,144 @@ function isUserInvolved(
   participatingIds: string[]
 ) {
   return m.creatorId === userId || participatingIds.includes(m.id)
+}
+
+function isTeamPickType(t: MatchType): boolean {
+  return (
+    t === 'team_pick' || t === 'team_pick_public' || t === 'team_pick_private'
+  )
+}
+
+function matchTypeIcon(t: MatchType): keyof typeof Ionicons.glyphMap {
+  if (t === 'open') return 'shuffle-outline'
+  if (t === 'players') return 'people-outline'
+  if (t === 'rival') return 'shield-outline'
+  return 'git-compare-outline'
+}
+
+function matchHeaderTheme(type: MatchType, isDark: boolean) {
+  if (type === 'rival') {
+    return {
+      bg: isDark ? 'rgba(239,68,68,0.16)' : 'rgba(220,38,38,0.08)',
+      text: isDark ? '#FCA5A5' : '#B91C1C',
+      iconBg: isDark ? 'rgba(239,68,68,0.25)' : 'rgba(220,38,38,0.12)',
+    }
+  }
+  if (type === 'players') {
+    return {
+      bg: isDark ? 'rgba(15,69,57,0.22)' : 'rgba(15,69,57,0.08)',
+      text: isDark ? '#86EFAC' : '#0F4539',
+      iconBg: isDark ? 'rgba(15,69,57,0.35)' : 'rgba(15,69,57,0.12)',
+    }
+  }
+  if (isTeamPickType(type)) {
+    return {
+      bg: isDark ? 'rgba(34,197,94,0.14)' : 'rgba(22,163,74,0.1)',
+      text: isDark ? '#86EFAC' : '#15803D',
+      iconBg: isDark ? 'rgba(34,197,94,0.25)' : 'rgba(22,163,74,0.12)',
+    }
+  }
+  return {
+    bg: isDark ? 'rgba(245,158,11,0.14)' : '#F2EBCF',
+    text: isDark ? '#FCD34D' : '#8A7332',
+    iconBg: isDark ? 'rgba(245,158,11,0.22)' : 'rgba(138,115,50,0.14)',
+  }
+}
+
+function levelChipTheme(level: Level, isDark: boolean) {
+  if (level === 'principiante') {
+    return {
+      bg: isDark ? 'rgba(148,163,184,0.18)' : 'rgba(255,255,255,0.65)',
+      text: isDark ? '#E2E8F0' : '#57534E',
+      border: isDark ? 'rgba(148,163,184,0.35)' : 'rgba(120,113,108,0.25)',
+    }
+  }
+  if (level === 'intermedio') {
+    return {
+      bg: isDark ? 'rgba(245,158,11,0.18)' : 'rgba(255,255,255,0.7)',
+      text: isDark ? '#FCD34D' : '#B45309',
+      border: isDark ? 'rgba(245,158,11,0.35)' : 'rgba(180,83,9,0.25)',
+    }
+  }
+  if (level === 'avanzado') {
+    return {
+      bg: isDark ? 'rgba(249,115,22,0.18)' : 'rgba(255,255,255,0.7)',
+      text: isDark ? '#FDBA74' : '#C2410C',
+      border: isDark ? 'rgba(249,115,22,0.35)' : 'rgba(194,65,12,0.25)',
+    }
+  }
+  return {
+    bg: isDark ? 'rgba(239,68,68,0.16)' : 'rgba(255,255,255,0.7)',
+    text: isDark ? '#FCA5A5' : '#B91C1C',
+    border: isDark ? 'rgba(239,68,68,0.35)' : 'rgba(185,28,28,0.25)',
+  }
+}
+
+function isPastMatch(m: MatchOpportunity, midnight: Date): boolean {
+  return (
+    m.status === 'completed' ||
+    m.status === 'cancelled' ||
+    ((m.status === 'pending' || m.status === 'confirmed') &&
+      m.dateTime.getTime() < midnight.getTime())
+  )
+}
+
+function pastStatusChip(
+  m: MatchOpportunity,
+  isDark: boolean
+): { label: string; color: string; bg: string } | null {
+  if (m.status === 'completed') {
+    return {
+      label: 'Finalizado',
+      color: isDark ? '#86EFAC' : '#15803D',
+      bg: isDark ? 'rgba(34,197,94,0.18)' : 'rgba(22,163,74,0.12)',
+    }
+  }
+  if (m.status === 'cancelled') {
+    return {
+      label: 'Cancelado',
+      color: isDark ? '#FCA5A5' : '#B91C1C',
+      bg: isDark ? 'rgba(239,68,68,0.18)' : 'rgba(220,38,38,0.1)',
+    }
+  }
+  return {
+    label: 'Vencido',
+    color: isDark ? '#FCD34D' : '#A16207',
+    bg: isDark ? 'rgba(245,158,11,0.18)' : 'rgba(217,119,6,0.12)',
+  }
+}
+
+function emptyStateForTab(tab: Tab): {
+  icon: keyof typeof Ionicons.glyphMap
+  title: string
+  subtitle: string
+} {
+  if (tab === 'upcoming') {
+    return {
+      icon: 'calendar-outline',
+      title: 'Sin partidos próximos',
+      subtitle: 'Crea uno nuevo o únete a una revuelta abierta desde Explorar.',
+    }
+  }
+  if (tab === 'invitations') {
+    return {
+      icon: 'mail-unread-outline',
+      title: 'Sin invitaciones',
+      subtitle: 'Cuando te inviten a un partido, aparecerá aquí para aceptar o rechazar.',
+    }
+  }
+  if (tab === 'chats') {
+    return {
+      icon: 'chatbubbles-outline',
+      title: 'Sin chats activos',
+      subtitle: 'Únete a un partido para coordinar horarios y logística con el grupo.',
+    }
+  }
+  return {
+    icon: 'checkmark-done-outline',
+    title: 'Sin historial aún',
+    subtitle: 'Los partidos finalizados o cancelados se listarán aquí.',
+  }
 }
 
 type Tab = 'upcoming' | 'invitations' | 'chats' | 'past'
@@ -210,7 +349,7 @@ export function MatchesHubScreen() {
       setLastByOpp(new Map())
       return
     }
-    const supabase = createClient()
+    const supabase = getSupabase()
     void fetchLastMessagesForOpportunities(
       supabase,
       chatOpportunities.map((c) => c.id)
@@ -222,7 +361,7 @@ export function MatchesHubScreen() {
       setInvitedIds([])
       return
     }
-    const supabase = createClient()
+    const supabase = getSupabase()
     void fetchInvitedOpportunityIds(supabase, currentUser.id).then(setInvitedIds)
   }, [currentUser?.id, matchOpportunities])
 
@@ -240,7 +379,7 @@ export function MatchesHubScreen() {
     try {
       await refreshMatchData()
       if (currentUser && isSupabaseConfigured()) {
-        const supabase = createClient()
+        const supabase = getSupabase()
         const ids = await fetchInvitedOpportunityIds(supabase, currentUser.id)
         setInvitedIds(ids)
       }
@@ -251,199 +390,211 @@ export function MatchesHubScreen() {
 
   const renderItem = useCallback<ListRenderItem<MatchOpportunity>>(
     ({ item: m }) => {
-    const isPast =
-      m.status === 'completed' ||
-      m.status === 'cancelled' ||
-      ((m.status === 'pending' || m.status === 'confirmed') &&
-        m.dateTime.getTime() < midnight.getTime())
-    const last = lastByOpp.get(m.id)
-    const isInvitationRow = tab === 'invitations'
-    const invitationBusy = respondingInvitationId === m.id
-    const dateTop = formatMatchDateTime(m.dateTime)
-    const pct =
-      m.playersNeeded && m.playersNeeded > 0
-        ? Math.max(0, Math.min(1, (m.playersJoined ?? 0) / m.playersNeeded))
-        : 0
-    return (
-      <Pressable
-        style={[
-          styles.card,
-          {
-            backgroundColor: ui.surface,
-            borderColor: ui.border,
-            shadowColor: ui.shadow,
-          },
-          isPast && styles.cardPast,
-        ]}
-        onPress={() =>
-          tab === 'chats'
-            ? router.push(`/partidos/chat/${m.id}`)
-            : router.push(`/partidos/${m.id}`)
-        }
-      >
-        <View style={[styles.cardHead, { backgroundColor: ui.cardHeadBg }]}>
-          <View style={styles.cardHeadLeft}>
-            <View style={[styles.typeIconWrap, { backgroundColor: ui.sectionSoft }]}>
-              <Ionicons
-                name={
-                  m.type === 'open'
-                    ? 'shuffle-outline'
-                    : m.type === 'players'
-                      ? 'people-outline'
-                      : m.type === 'rival'
-                        ? 'shield-outline'
-                        : 'git-compare-outline'
-                }
-                size={14}
-                color={isDark ? '#B6C4B8' : '#8A7332'}
-              />
-            </View>
-            <Text style={[styles.cardHeadDate, { color: ui.cardHeadText }]} numberOfLines={1}>
-              {matchTypeLabel(m.type)}
-            </Text>
-          </View>
-          <View style={[styles.typeChip, { borderColor: ui.border }]}>
-            <Text style={[styles.typeChipText, { color: ui.cardHeadText }]}>
-              {levelLabel(m.level)}
-            </Text>
-          </View>
-        </View>
+      const isPast = isPastMatch(m, midnight)
+      const last = lastByOpp.get(m.id)
+      const isInvitationRow = tab === 'invitations'
+      const invitationBusy = respondingInvitationId === m.id
+      const dateTop = formatMatchDateTime(m.dateTime)
+      const pct =
+        m.playersNeeded && m.playersNeeded > 0
+          ? Math.max(0, Math.min(1, (m.playersJoined ?? 0) / m.playersNeeded))
+          : 0
+      const header = matchHeaderTheme(m.type, isDark)
+      const levelChip = levelChipTheme(m.level, isDark)
+      const statusChip = isPast ? pastStatusChip(m, isDark) : null
+      const isOrganizer = m.creatorId === currentUserId
 
-        <View style={styles.cardBody}>
-          <View style={styles.cardIdentity}>
-            <View style={[styles.avatarFallback, { borderColor: ui.border }]}>
-              <Ionicons name="football-outline" size={18} color={ui.muted} />
-            </View>
-            <View style={styles.cardIdentityText}>
-              <Text style={[styles.cardTitle, { color: ui.text }]} numberOfLines={2}>
-                {m.title}
+      const openDetail = () => router.push(`/partidos/${m.id}`)
+      const openChat = () => router.push(`/partidos/chat/${m.id}`)
+
+      return (
+        <View
+          style={[
+            styles.card,
+            {
+              backgroundColor: ui.surface,
+              borderColor: ui.border,
+              shadowColor: ui.shadow,
+            },
+          ]}
+        >
+          <View style={[styles.cardHead, { backgroundColor: header.bg }]}>
+            <View style={styles.cardHeadLeft}>
+              <View style={[styles.typeIconWrap, { backgroundColor: header.iconBg }]}>
+                <Ionicons
+                  name={matchTypeIcon(m.type)}
+                  size={14}
+                  color={header.text}
+                />
+              </View>
+              <Text style={[styles.cardHeadType, { color: header.text }]} numberOfLines={1}>
+                {matchTypeLabel(m.type)}
               </Text>
-              <Text style={[styles.cardMeta, { color: ui.muted }]} numberOfLines={2}>
-                {m.description?.trim() || 'Sin descripción aún'}
+            </View>
+            <View
+              style={[
+                styles.levelChip,
+                {
+                  backgroundColor: levelChip.bg,
+                  borderColor: levelChip.border,
+                },
+              ]}
+            >
+              <Text style={[styles.levelChipText, { color: levelChip.text }]}>
+                {levelLabel(m.level)}
               </Text>
             </View>
-            {m.creatorId === currentUserId ? (
-              <View style={[styles.rolePill, { borderColor: ui.tabOnBg }]}>
-                <Text style={[styles.rolePillText, { color: ui.tabOnBg }]}>
-                  Organiza
+          </View>
+
+          <View style={styles.cardBody}>
+            <View style={styles.cardIdentity}>
+              <View style={[styles.avatarFallback, { borderColor: ui.border }]}>
+                <Ionicons name="football-outline" size={20} color={ui.muted} />
+              </View>
+              <View style={styles.cardIdentityText}>
+                <Text style={[styles.cardTitle, { color: ui.text }]} numberOfLines={2}>
+                  {m.title}
                 </Text>
+                <Text style={[styles.cardMeta, { color: ui.muted }]} numberOfLines={2}>
+                  {m.description?.trim() || 'Sin descripción aún'}
+                </Text>
+              </View>
+              {isOrganizer && tab !== 'chats' ? (
+                <View style={[styles.rolePill, { borderColor: ui.tabOnBg, backgroundColor: ui.badgeBg }]}>
+                  <Text style={[styles.rolePillText, { color: ui.tabOnBg }]}>
+                    Organiza
+                  </Text>
+                </View>
+              ) : null}
+            </View>
+
+            <View style={styles.metaRow}>
+              <View style={styles.metaInline}>
+                <Ionicons name="calendar-outline" size={15} color={ui.tabOnBg} />
+                <Text style={[styles.metaInlineText, { color: ui.muted }]}>{dateTop}</Text>
+              </View>
+              <View style={styles.metaInline}>
+                <Ionicons name="location-outline" size={15} color={ui.tabOnBg} />
+                <Text style={[styles.metaInlineText, { color: ui.muted }]} numberOfLines={1}>
+                  {m.location}
+                </Text>
+              </View>
+            </View>
+
+            {tab === 'chats' ? (
+              <View style={[styles.chatPreview, { backgroundColor: ui.surfaceAlt, borderColor: ui.border }]}>
+                <Ionicons name="chatbubble-ellipses-outline" size={16} color={ui.tabOnBg} />
+                <Text style={[styles.chatPreviewText, { color: ui.text }]} numberOfLines={2}>
+                  {last?.content ?? 'Sin mensajes todavía. Escribe para coordinar.'}
+                </Text>
+              </View>
+            ) : null}
+
+            {m.playersNeeded != null && tab !== 'chats' && tab !== 'past' ? (
+              <View style={styles.cardPlayersWrap}>
+                <View style={styles.cuposRow}>
+                  <Text style={[styles.cuposLabel, { color: ui.muted }]}>Cupos</Text>
+                  <Text style={[styles.cuposValue, { color: ui.text }]}>
+                    {m.playersJoined ?? 0}/{m.playersNeeded}
+                  </Text>
+                </View>
+                <View style={[styles.progressTrack, { backgroundColor: ui.progressTrack }]}>
+                  <View
+                    style={[
+                      styles.progressFill,
+                      { width: `${Math.round(pct * 100)}%`, backgroundColor: ui.tabOnBg },
+                    ]}
+                  />
+                </View>
               </View>
             ) : null}
           </View>
 
-          <View style={styles.metaRow}>
-            <View style={styles.metaInline}>
-              <Ionicons name="calendar-outline" size={16} color={ui.tabOnBg} />
-              <Text style={[styles.metaInlineText, { color: ui.muted }]}>{dateTop}</Text>
-            </View>
-            <View style={styles.metaInline}>
-              <Ionicons name="location-outline" size={16} color={ui.tabOnBg} />
-              <Text style={[styles.metaInlineText, { color: ui.muted }]}>{m.location}</Text>
-            </View>
-          </View>
-
-          {tab === 'chats' && last ? (
-            <Text style={[styles.lastMsg, { color: ui.text }]} numberOfLines={2}>
-              {last.content}
-            </Text>
-          ) : null}
-          {m.playersNeeded != null && tab !== 'chats' ? (
-            <View style={styles.cardPlayersWrap}>
-              <Text style={[styles.cardMeta, { color: ui.muted }]}>
-                Cupos {m.playersJoined ?? 0}/{m.playersNeeded}
-              </Text>
-              <View style={[styles.progressTrack, { backgroundColor: ui.progressTrack }]}>
-                <View
+          <View style={[styles.cardFooter, { borderTopColor: ui.border }]}>
+            {isInvitationRow ? (
+              <View style={styles.invitationActions}>
+                <Pressable
                   style={[
-                    styles.progressFill,
-                    { width: `${Math.round(pct * 100)}%`, backgroundColor: ui.tabOnBg },
+                    styles.invitationBtn,
+                    styles.invitationRejectBtn,
+                    invitationBusy && styles.invitationBtnDisabled,
                   ]}
-                />
+                  disabled={invitationBusy}
+                  onPress={() => {
+                    if (!currentUserId) return
+                    setRespondingInvitationId(m.id)
+                    void (async () => {
+                      const res = await respondToMatchInvitation(m.id, false)
+                      setRespondingInvitationId(null)
+                      if (!res.ok) {
+                        Alert.alert('No se pudo rechazar', res.error || 'Error desconocido')
+                        return
+                      }
+                      const supabase = getSupabase()
+                      const ids = await fetchInvitedOpportunityIds(supabase, currentUserId)
+                      setInvitedIds(ids)
+                    })()
+                  }}
+                >
+                  <Text style={styles.invitationRejectText}>Rechazar</Text>
+                </Pressable>
+                <Pressable
+                  style={[
+                    styles.invitationBtn,
+                    styles.invitationAcceptBtn,
+                    invitationBusy && styles.invitationBtnDisabled,
+                  ]}
+                  disabled={invitationBusy}
+                  onPress={() => {
+                    if (!currentUserId) return
+                    setRespondingInvitationId(m.id)
+                    void (async () => {
+                      const res = await respondToMatchInvitation(m.id, true)
+                      setRespondingInvitationId(null)
+                      if (!res.ok) {
+                        Alert.alert('No se pudo aceptar', res.error || 'Error desconocido')
+                        return
+                      }
+                      const supabase = getSupabase()
+                      const ids = await fetchInvitedOpportunityIds(supabase, currentUserId)
+                      setInvitedIds(ids)
+                      Alert.alert('Invitación aceptada', 'Ya te uniste al partido.')
+                    })()
+                  }}
+                >
+                  <Text style={styles.invitationAcceptText}>Aceptar</Text>
+                </Pressable>
               </View>
-            </View>
-          ) : null}
+            ) : (
+              <>
+                {statusChip ? (
+                  <View style={[styles.statusChip, { backgroundColor: statusChip.bg }]}>
+                    <Text style={[styles.statusChipText, { color: statusChip.color }]}>
+                      {statusChip.label}
+                    </Text>
+                  </View>
+                ) : (
+                  <View style={styles.footerSpacer} />
+                )}
+                <Pressable
+                  style={[styles.detailBtn, { backgroundColor: ui.detailBtnBg }]}
+                  onPress={tab === 'chats' ? openChat : openDetail}
+                >
+                  <Text style={[styles.detailBtnText, { color: ui.detailBtnText }]}>
+                    {tab === 'chats' ? 'Abrir chat' : 'Detalles'}
+                  </Text>
+                  <Ionicons
+                    name="chevron-forward"
+                    size={16}
+                    color={ui.detailBtnText}
+                    style={styles.detailBtnIcon}
+                  />
+                </Pressable>
+              </>
+            )}
+          </View>
         </View>
-        {tab === 'past' ? (
-          <Text style={[styles.badgePast, { color: isDark ? '#facc15' : '#a16207' }]}>
-            Historial
-          </Text>
-        ) : null}
-        {tab !== 'invitations' ? (
-          <View style={styles.cardActions}>
-            <Pressable
-              style={[
-                styles.detailBtn,
-                { backgroundColor: ui.detailBtnBg },
-              ]}
-              onPress={() =>
-                tab === 'chats'
-                  ? router.push(`/partidos/chat/${m.id}`)
-                  : router.push(`/partidos/${m.id}`)
-              }
-            >
-              <Text style={[styles.detailBtnText, { color: ui.detailBtnText }]}>
-                {tab === 'chats' ? 'Abrir chat' : 'Detalles'}
-              </Text>
-            </Pressable>
-          </View>
-        ) : null}
-        {isInvitationRow ? (
-          <View style={styles.invitationActions}>
-            <Pressable
-              style={[
-                styles.invitationBtn,
-                styles.invitationRejectBtn,
-                invitationBusy && styles.invitationBtnDisabled,
-              ]}
-              disabled={invitationBusy}
-              onPress={() => {
-                if (!currentUserId) return
-                setRespondingInvitationId(m.id)
-                void (async () => {
-                  const res = await respondToMatchInvitation(m.id, false)
-                  setRespondingInvitationId(null)
-                  if (!res.ok) {
-                    Alert.alert('No se pudo rechazar', res.error || 'Error desconocido')
-                    return
-                  }
-                  const supabase = createClient()
-                  const ids = await fetchInvitedOpportunityIds(supabase, currentUserId)
-                  setInvitedIds(ids)
-                })()
-              }}
-            >
-              <Text style={styles.invitationRejectText}>Rechazar</Text>
-            </Pressable>
-            <Pressable
-              style={[
-                styles.invitationBtn,
-                styles.invitationAcceptBtn,
-                invitationBusy && styles.invitationBtnDisabled,
-              ]}
-              disabled={invitationBusy}
-              onPress={() => {
-                if (!currentUserId) return
-                setRespondingInvitationId(m.id)
-                void (async () => {
-                  const res = await respondToMatchInvitation(m.id, true)
-                  setRespondingInvitationId(null)
-                  if (!res.ok) {
-                    Alert.alert('No se pudo aceptar', res.error || 'Error desconocido')
-                    return
-                  }
-                  const supabase = createClient()
-                  const ids = await fetchInvitedOpportunityIds(supabase, currentUserId)
-                  setInvitedIds(ids)
-                  Alert.alert('Invitación aceptada', 'Ya te uniste al partido.')
-                })()
-              }}
-            >
-              <Text style={styles.invitationAcceptText}>Aceptar</Text>
-            </Pressable>
-          </View>
-        ) : null}
-      </Pressable>
-    )
+      )
     },
     [
       tab,
@@ -529,7 +680,7 @@ export function MatchesHubScreen() {
         />
       </View>
 
-      <FlashList
+      <FlatList
         data={data}
         keyExtractor={(m) => m.id}
         renderItem={renderItem}
@@ -538,42 +689,37 @@ export function MatchesHubScreen() {
           <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
         }
         ListEmptyComponent={
-          <View
-            style={[
-              styles.emptyCard,
-              { backgroundColor: ui.surface, borderColor: ui.border },
-            ]}
-          >
-            <View style={[styles.emptyIconWrap, { backgroundColor: ui.badgeBg }]}>
-              <Ionicons name="time-outline" size={26} color={ui.tabOnBg} />
-            </View>
-            <Text style={[styles.emptyCardTitle, { color: ui.text }]}>
-              {tab === 'upcoming'
-                ? 'Sin más partidos próximos'
-                : tab === 'invitations'
-                  ? 'No tienes invitaciones pendientes'
-                  : tab === 'chats'
-                    ? 'Sin chats por ahora'
-                    : 'Aún no tienes historial'}
-            </Text>
-            <Text style={[styles.emptyCardSub, { color: ui.muted }]}>
-              {tab === 'upcoming'
-                ? 'Crea uno o únete a una revuelta abierta'
-                : tab === 'invitations'
-                  ? 'Cuando te inviten a un partido, aparecerá aquí'
-                  : tab === 'chats'
-                    ? 'Únete a un partido para coordinar con el grupo'
-                    : 'Cuando cierres partidos, los verás aquí'}
-            </Text>
-            <Pressable
-              style={[styles.emptyCta, { backgroundColor: ui.tabOnBg }]}
-              onPress={() => router.push('/explorar')}
-            >
-              <Text style={[styles.emptyCtaText, { color: ui.tabOnText }]}>
-                Explorar partidos
-              </Text>
-            </Pressable>
-          </View>
+          (() => {
+            const empty = emptyStateForTab(tab)
+            return (
+              <View
+                style={[
+                  styles.emptyCard,
+                  { backgroundColor: ui.surface, borderColor: ui.border },
+                ]}
+              >
+                <View style={[styles.emptyIconWrap, { backgroundColor: ui.badgeBg }]}>
+                  <Ionicons name={empty.icon} size={28} color={ui.tabOnBg} />
+                </View>
+                <Text style={[styles.emptyCardTitle, { color: ui.text }]}>
+                  {empty.title}
+                </Text>
+                <Text style={[styles.emptyCardSub, { color: ui.muted }]}>
+                  {empty.subtitle}
+                </Text>
+                {tab === 'upcoming' ? (
+                  <Pressable
+                    style={[styles.emptyCta, { backgroundColor: ui.tabOnBg }]}
+                    onPress={() => router.push('/explorar')}
+                  >
+                    <Text style={[styles.emptyCtaText, { color: ui.tabOnText }]}>
+                      Explorar partidos
+                    </Text>
+                  </Pressable>
+                ) : null}
+              </View>
+            )
+          })()
         }
       />
     </SafeAreaView>
@@ -608,22 +754,29 @@ function TopTab({
   return (
     <Pressable style={styles.topTab} onPress={onPress}>
       <View style={styles.topTabInner}>
-        <Ionicons
-          name={icon}
-          size={15}
-          color={active ? activeColor : textColor}
-          style={styles.topTabIcon}
-        />
-        <Text style={[styles.topTabText, { color: active ? activeColor : textColor }]}>
+        <View style={styles.topTabIconRow}>
+          <Ionicons
+            name={icon}
+            size={16}
+            color={active ? activeColor : textColor}
+          />
+          {badge ? (
+            <View style={[styles.tabBadge, { backgroundColor: badgeBg ?? 'rgba(116,212,93,0.22)' }]}>
+              <Text style={[styles.tabBadgeText, { color: active ? activeColor : activeColor }]}>
+                {badge}
+              </Text>
+            </View>
+          ) : null}
+        </View>
+        <Text
+          style={[
+            styles.topTabText,
+            { color: active ? activeColor : textColor },
+            active && styles.topTabTextActive,
+          ]}
+        >
           {label}
         </Text>
-        {badge ? (
-          <View style={[styles.tabBadge, { backgroundColor: badgeBg ?? 'rgba(116,212,93,0.22)' }]}>
-            <Text style={[styles.tabBadgeText, { color: active ? '#0D0F0E' : activeColor }]}>
-              {badge}
-            </Text>
-          </View>
-        ) : null}
       </View>
       <View
         style={[
@@ -639,21 +792,21 @@ const styles = StyleSheet.create({
   flex: { flex: 1, backgroundColor: '#f9fafb' },
   header: {
     paddingHorizontal: 16,
-    paddingTop: 8,
-    paddingBottom: 8,
+    paddingTop: 10,
+    paddingBottom: 10,
   },
   headerRow: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
   },
-  headerTitle: { fontSize: 22, fontWeight: '800', color: '#111' },
-  headerSub: { marginTop: 4, fontSize: 15, color: '#6b7280' },
+  headerTitle: { fontSize: 26, fontWeight: '800', color: '#111', letterSpacing: -0.3 },
+  headerSub: { marginTop: 4, fontSize: 14, color: '#6b7280', lineHeight: 20 },
   tabs: {
     flexDirection: 'row',
-    paddingHorizontal: 8,
-    paddingTop: 2,
-    paddingBottom: 6,
+    paddingHorizontal: 6,
+    paddingTop: 4,
+    paddingBottom: 0,
     borderBottomWidth: StyleSheet.hairlineWidth,
   },
   topTab: {
@@ -664,45 +817,43 @@ const styles = StyleSheet.create({
     flexDirection: 'column',
     alignItems: 'center',
     justifyContent: 'center',
-    minHeight: 52,
-    gap: 2,
+    minHeight: 54,
+    gap: 4,
+    paddingHorizontal: 2,
   },
-  topTabIcon: { marginTop: 1 },
-  topTabText: { fontSize: 12, fontWeight: '700' },
+  topTabIconRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+  },
+  topTabText: { fontSize: 11, fontWeight: '600' },
+  topTabTextActive: { fontWeight: '800' },
   tabBadge: {
     minWidth: 18,
     height: 18,
-    paddingHorizontal: 4,
+    paddingHorizontal: 5,
     borderRadius: 9,
     alignItems: 'center',
     justifyContent: 'center',
-    marginLeft: 2,
   },
-  tabBadgeText: { fontSize: 11, fontWeight: '700' },
-  tabUnderline: { height: 3, width: '75%', borderRadius: 999, marginTop: 2 },
-  lastMsg: {
-    fontSize: 14,
-    color: '#374151',
-    marginTop: 8,
-    fontStyle: 'italic',
-  },
-  listContent: { padding: 16, paddingBottom: 32 },
+  tabBadgeText: { fontSize: 10, fontWeight: '800' },
+  tabUnderline: { height: 3, width: '72%', borderRadius: 999, marginTop: 4 },
+  listContent: { padding: 16, paddingBottom: 32, gap: 12 },
   card: {
     backgroundColor: '#fff',
-    borderRadius: 16,
-    padding: 0,
-    marginBottom: 12,
+    borderRadius: 18,
+    marginBottom: 14,
     borderWidth: 1,
     borderColor: '#e5e7eb',
     overflow: 'hidden',
-    shadowOffset: { width: 0, height: 3 },
-    shadowOpacity: 0.18,
-    shadowRadius: 10,
-    elevation: 2,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.08,
+    shadowRadius: 12,
+    elevation: 3,
   },
   cardHead: {
     paddingHorizontal: 14,
-    paddingVertical: 10,
+    paddingVertical: 11,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
@@ -711,6 +862,9 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
+    flex: 1,
+    minWidth: 0,
+    paddingRight: 8,
   },
   typeIconWrap: {
     width: 28,
@@ -719,79 +873,103 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  cardHeadDate: { fontSize: 14, fontWeight: '800', letterSpacing: 0.4 },
-  typeChip: {
+  cardHeadType: { fontSize: 14, fontWeight: '800', letterSpacing: 0.2 },
+  levelChip: {
     borderWidth: 1,
     borderRadius: 999,
-    paddingHorizontal: 12,
-    paddingVertical: 3,
-    backgroundColor: 'rgba(255,255,255,0.35)',
+    paddingHorizontal: 11,
+    paddingVertical: 4,
   },
-  typeChipText: { fontSize: 12, fontWeight: '700' },
-  cardPast: { opacity: 0.88 },
-  cardBody: { paddingHorizontal: 16, paddingTop: 12, paddingBottom: 14 },
-  cardIdentity: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  levelChipText: { fontSize: 11, fontWeight: '700' },
+  cardBody: { paddingHorizontal: 14, paddingTop: 14, paddingBottom: 12 },
+  cardIdentity: { flexDirection: 'row', alignItems: 'flex-start', gap: 10 },
   avatarFallback: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
+    width: 46,
+    height: 46,
+    borderRadius: 23,
     borderWidth: 1,
     alignItems: 'center',
     justifyContent: 'center',
     backgroundColor: 'rgba(148,163,184,0.10)',
+    marginTop: 2,
   },
-  cardIdentityText: { flex: 1 },
+  cardIdentityText: { flex: 1, minWidth: 0 },
   rolePill: {
     borderWidth: 1,
     borderRadius: 999,
-    paddingHorizontal: 10,
+    paddingHorizontal: 9,
     paddingVertical: 4,
+    marginTop: 2,
   },
-  rolePillText: { fontSize: 12, fontWeight: '700' },
+  rolePillText: { fontSize: 11, fontWeight: '800' },
   cardTitle: {
-    fontSize: 18,
-    fontWeight: '700',
-    marginBottom: 2,
+    fontSize: 17,
+    fontWeight: '800',
+    lineHeight: 22,
     color: '#111',
   },
-  cardMeta: { fontSize: 14, color: '#6b7280', marginTop: 2 },
-  metaRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 10, marginTop: 10 },
-  metaInline: { flexDirection: 'row', alignItems: 'center', gap: 5 },
-  metaInlineText: { fontSize: 13, fontWeight: '600' },
-  cardPlayersWrap: { marginTop: 10 },
-  progressTrack: { height: 8, borderRadius: 4, marginTop: 8, overflow: 'hidden' },
-  progressFill: { height: '100%', borderRadius: 4 },
-  cardActions: {
+  cardMeta: { fontSize: 13, color: '#6b7280', marginTop: 4, lineHeight: 18 },
+  metaRow: { flexDirection: 'column', gap: 6, marginTop: 12 },
+  metaInline: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  metaInlineText: { fontSize: 13, fontWeight: '600', flex: 1 },
+  chatPreview: {
     flexDirection: 'row',
-    justifyContent: 'flex-end',
-    paddingHorizontal: 14,
-    paddingBottom: 14,
-    marginTop: 0,
+    alignItems: 'flex-start',
+    gap: 8,
+    marginTop: 12,
+    padding: 10,
+    borderRadius: 12,
+    borderWidth: 1,
   },
-  detailBtn: {
-    minWidth: 126,
-    paddingVertical: 10,
-    paddingHorizontal: 20,
-    borderRadius: 999,
+  chatPreviewText: { flex: 1, fontSize: 13, lineHeight: 18 },
+  cardPlayersWrap: { marginTop: 12 },
+  cuposRow: {
+    flexDirection: 'row',
     alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 6,
   },
-  detailBtnText: { fontSize: 16, fontWeight: '800' },
-  badgePast: {
-    marginTop: 4,
-    marginLeft: 16,
-    marginBottom: 8,
-    fontSize: 12,
-    fontWeight: '600',
+  cuposLabel: { fontSize: 12, fontWeight: '700', letterSpacing: 0.4 },
+  cuposValue: { fontSize: 13, fontWeight: '800' },
+  progressTrack: { height: 7, borderRadius: 999, overflow: 'hidden' },
+  progressFill: { height: '100%', borderRadius: 999 },
+  cardFooter: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 10,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    borderTopWidth: StyleSheet.hairlineWidth,
   },
+  footerSpacer: { flex: 1 },
+  statusChip: {
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 999,
+  },
+  statusChipText: { fontSize: 11, fontWeight: '800' },
+  detailBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 4,
+    minWidth: 118,
+    paddingVertical: 10,
+    paddingHorizontal: 18,
+    borderRadius: 999,
+  },
+  detailBtnText: { fontSize: 14, fontWeight: '800' },
+  detailBtnIcon: { marginTop: 1 },
   invitationActions: {
     flexDirection: 'row',
     gap: 8,
-    marginTop: 12,
+    flex: 1,
   },
   invitationBtn: {
     flex: 1,
-    paddingVertical: 10,
-    borderRadius: 10,
+    paddingVertical: 11,
+    borderRadius: 12,
     alignItems: 'center',
     borderWidth: 1,
   },
@@ -800,55 +978,58 @@ const styles = StyleSheet.create({
     borderColor: 'rgba(22, 163, 74, 0.35)',
   },
   invitationRejectBtn: {
-    backgroundColor: 'rgba(220, 38, 38, 0.1)',
-    borderColor: 'rgba(220, 38, 38, 0.35)',
+    backgroundColor: 'rgba(220, 38, 38, 0.08)',
+    borderColor: 'rgba(220, 38, 38, 0.3)',
   },
   invitationAcceptText: {
     color: '#166534',
-    fontWeight: '700',
+    fontWeight: '800',
+    fontSize: 14,
   },
   invitationRejectText: {
     color: '#991b1b',
-    fontWeight: '700',
+    fontWeight: '800',
+    fontSize: 14,
   },
   invitationBtnDisabled: {
     opacity: 0.5,
   },
-  emptyList: { display: 'none' },
   emptyCard: {
-    marginTop: 18,
+    marginTop: 24,
     borderWidth: 1,
     borderStyle: 'dashed',
-    borderRadius: 22,
+    borderRadius: 20,
     paddingVertical: 28,
-    paddingHorizontal: 20,
+    paddingHorizontal: 22,
     alignItems: 'center',
   },
   emptyIconWrap: {
-    width: 62,
-    height: 62,
-    borderRadius: 31,
+    width: 58,
+    height: 58,
+    borderRadius: 29,
     alignItems: 'center',
     justifyContent: 'center',
   },
   emptyCardTitle: {
     marginTop: 14,
-    fontSize: 31,
+    fontSize: 20,
     fontWeight: '800',
     textAlign: 'center',
   },
   emptyCardSub: {
     marginTop: 8,
-    fontSize: 15,
+    fontSize: 14,
     textAlign: 'center',
+    lineHeight: 20,
+    maxWidth: 280,
   },
   emptyCta: {
     marginTop: 18,
     borderRadius: 999,
     paddingVertical: 12,
-    paddingHorizontal: 24,
+    paddingHorizontal: 22,
   },
-  emptyCtaText: { fontSize: 16, fontWeight: '800' },
+  emptyCtaText: { fontSize: 15, fontWeight: '800' },
   emptyWrap: { flex: 1, justifyContent: 'center', padding: 24 },
   emptyText: { fontSize: 15, color: '#6b7280', textAlign: 'center' },
 })

@@ -1,5 +1,4 @@
 import { Ionicons } from '@expo/vector-icons'
-import { FlashList, type ListRenderItemInfo } from '@shopify/flash-list'
 import { router } from 'expo-router'
 import {
   useCallback,
@@ -12,6 +11,7 @@ import {
 import {
   ActivityIndicator,
   Alert,
+  FlatList,
   Modal,
   Pressable,
   ScrollView,
@@ -20,12 +20,13 @@ import {
   Text,
   TextInput,
   View,
+  type ListRenderItemInfo,
 } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
 
 import { useApp } from '../lib/app-provider'
-import { useThemePreference } from '../lib/theme-context'
-import { createClient, isSupabaseConfigured } from '../lib/supabase/client'
+import { useScreenTheme } from '../lib/theme-ui'
+import { getSupabase, isSupabaseConfigured } from '../lib/supabase/client'
 import { fetchSportsVenuesList } from '../lib/supabase/venue-owner-queries'
 import {
   fetchVenueCourts,
@@ -90,25 +91,24 @@ export function CreateMatchScreen() {
     getUserTeams,
     getFilteredTeams,
   } = useApp()
-  const { tokens, resolved } = useThemePreference()
-  const isDark = resolved === 'dark'
-
+  const theme = useScreenTheme()
+  const styles = useMemo(() => createStyles(theme), [theme])
   const revueltaUi = useMemo(
     () => ({
-      text: tokens.textPrimary,
-      muted: tokens.textMuted,
-      border: tokens.borderDark,
-      inputBg: isDark ? '#16181c' : '#f4f4f5',
-      surface: isDark ? '#1c1f26' : '#ffffff',
-      onPrimary: '#0a0d08',
-      subtleIcon: isDark ? 'rgba(47,158,68,0.9)' : tokens.primaryGreen,
+      text: theme.text,
+      muted: theme.textMuted,
+      border: theme.border,
+      inputBg: theme.inputBg,
+      surface: theme.cardElevated,
+      onPrimary: theme.primaryBtnText,
+      subtleIcon: theme.isDark ? 'rgba(47,158,68,0.9)' : theme.primary,
       /** Detalles team pick (mock mint / bosque). */
-      teamPickMintField: isDark ? 'rgba(55,214,122,0.1)' : '#E8F5E9',
-      teamPickRoleOffBg: isDark ? '#14171d' : '#FFFFFF',
-      teamPickRoleOnBg: '#166534',
-      teamPickRoleOnText: '#FFFFFF',
+      teamPickMintField: theme.isDark ? 'rgba(55,214,122,0.1)' : 'rgba(47,158,68,0.1)',
+      teamPickRoleOffBg: theme.isDark ? theme.cardElevated : theme.card,
+      teamPickRoleOnBg: theme.primary,
+      teamPickRoleOnText: theme.primaryBtnText,
     }),
-    [tokens, isDark]
+    [theme]
   )
 
   const [step, setStep] = useState(1)
@@ -161,7 +161,7 @@ export function CreateMatchScreen() {
 
   useEffect(() => {
     if (!isSupabaseConfigured()) return
-    void fetchSportsVenuesList(createClient()).then(setSportsVenuesFromDb)
+    void fetchSportsVenuesList(getSupabase()).then(setSportsVenuesFromDb)
   }, [])
 
   useEffect(() => {
@@ -217,7 +217,7 @@ export function CreateMatchScreen() {
     setLoadingVenueTimes(true)
     setVenueTimeHelp('Buscando horarios disponibles…')
     void (async () => {
-      const supabase = createClient()
+      const supabase = getSupabase()
       const venue = sportsVenuesFromDb.find((v) => v.id === linkedVenueId)
       const slotDuration = venue?.slotDurationMinutes ?? 60
       const dayStart = new Date(`${formData.date}T00:00:00`)
@@ -293,7 +293,7 @@ export function CreateMatchScreen() {
     let cancelled = false
     setLoadingAlternativeVenues(true)
     void (async () => {
-      const supabase = createClient()
+      const supabase = getSupabase()
       const dayStart = new Date(`${formData.date}T00:00:00`)
       const dayEnd = new Date(dayStart)
       dayEnd.setDate(dayEnd.getDate() + 1)
@@ -407,12 +407,12 @@ export function CreateMatchScreen() {
   const renderVenueModalRow = useCallback(
     ({ item }: ListRenderItemInfo<SportsVenue>) => (
       <Pressable style={styles.modalRow} onPress={() => onVenuePick(item)}>
-        <Text style={[styles.modalRowText, { color: tokens.textPrimary }]}>
+        <Text style={[styles.modalRowText, { color: theme.text }]}>
           {item.name} — {item.city}
         </Text>
       </Pressable>
     ),
-    [onVenuePick, tokens.textPrimary]
+    [onVenuePick, theme.text]
   )
 
   const renderTimeModalRow = useCallback(
@@ -425,12 +425,12 @@ export function CreateMatchScreen() {
           setTimeModal(false)
         }}
       >
-        <Text style={[styles.modalRowText, { color: tokens.textPrimary }]}>
+        <Text style={[styles.modalRowText, { color: theme.text }]}>
           {item.label}
         </Text>
       </Pressable>
     ),
-    [tokens.textPrimary]
+    [theme.text]
   )
 
   const renderUserTeamRow = useCallback(
@@ -478,22 +478,22 @@ export function CreateMatchScreen() {
             style={[
               styles.altBox,
               {
-                backgroundColor: isDark
+                backgroundColor: theme.isDark
                   ? 'rgba(245, 158, 11, 0.12)'
                   : 'rgba(245, 158, 11, 0.14)',
-                borderColor: isDark
+                borderColor: theme.isDark
                   ? 'rgba(245, 158, 11, 0.42)'
                   : 'rgba(245, 158, 11, 0.35)',
               },
             ]}
           >
-            <Text style={[styles.altTitle, { color: tokens.textPrimary }]}>
+            <Text style={[styles.altTitle, { color: theme.text }]}>
               {bookingNoCourt
                 ? `Se ocupó el último cupo a las ${labelForHm(formData.time)}.`
                 : `Este centro no tiene cupo a las ${labelForHm(formData.time)}.`}
             </Text>
             {loadingAlternativeVenues ? (
-              <Text style={[styles.altSub, { color: tokens.textMuted }]}>
+              <Text style={[styles.altSub, { color: theme.textMuted }]}>
                 Buscando otros centros…
               </Text>
             ) : alternativeVenues.length > 0 ? (
@@ -504,8 +504,8 @@ export function CreateMatchScreen() {
                     style={[
                       styles.altChip,
                       {
-                        backgroundColor: tokens.cardDark,
-                        borderColor: tokens.borderDark,
+                        backgroundColor: theme.card,
+                        borderColor: theme.border,
                       },
                     ]}
                     onPress={() => {
@@ -520,7 +520,7 @@ export function CreateMatchScreen() {
                     }}
                   >
                     <Text
-                      style={[styles.altChipText, { color: tokens.textPrimary }]}
+                      style={[styles.altChipText, { color: theme.text }]}
                     >
                       {v.name} — {v.city}
                     </Text>
@@ -528,7 +528,7 @@ export function CreateMatchScreen() {
                 ))}
               </View>
             ) : (
-              <Text style={[styles.altSub, { color: tokens.textMuted }]}>
+              <Text style={[styles.altSub, { color: theme.textMuted }]}>
                 No hay otros centros con ese horario.
               </Text>
             )}
@@ -541,14 +541,14 @@ export function CreateMatchScreen() {
       bookingNoCourt,
       formData.date,
       formData.time,
-      isDark,
+      theme.isDark,
       linkedVenueId,
       loadingAlternativeVenues,
       shouldSuggestAlternatives,
-      tokens.borderDark,
-      tokens.cardDark,
-      tokens.textMuted,
-      tokens.textPrimary,
+      theme.border,
+      theme.card,
+      theme.textMuted,
+      theme.text,
     ]
   )
 
@@ -568,7 +568,7 @@ export function CreateMatchScreen() {
     setSubmitting(true)
     try {
       if (matchType === 'team_pick_flow') {
-        const supabase = createClient()
+        const supabase = getSupabase()
         const linked =
           sportsVenuesFromDb.find((x) => x.id === linkedVenueId) ??
           sportsVenuesFromDb.find((x) => x.name === formData.venue.trim())
@@ -713,8 +713,8 @@ export function CreateMatchScreen() {
 
   if (!currentUser || currentUser.accountType !== 'player') {
     return (
-      <SafeAreaView style={[styles.safe, { backgroundColor: tokens.bgDark }]}>
-        <Text style={[styles.gate, { color: tokens.textMuted }]}>
+      <SafeAreaView style={[styles.safe, { backgroundColor: theme.bg }]}>
+        <Text style={[styles.gate, { color: theme.textMuted }]}>
           Solo jugadores pueden publicar partidos aquí.
         </Text>
       </SafeAreaView>
@@ -723,15 +723,15 @@ export function CreateMatchScreen() {
 
   if (isSubmitted) {
     return (
-      <SafeAreaView style={[styles.safe, { backgroundColor: tokens.bgDark }]}>
+      <SafeAreaView style={[styles.safe, { backgroundColor: theme.bg }]}>
         <View style={styles.success}>
-          <Text style={[styles.successIcon, { color: tokens.primaryGreen }]}>
+          <Text style={[styles.successIcon, { color: theme.primary }]}>
             ✓
           </Text>
-          <Text style={[styles.successTitle, { color: tokens.textPrimary }]}>
+          <Text style={[styles.successTitle, { color: theme.text }]}>
             {matchType === 'reserve' ? 'Reserva creada' : '¡Publicado!'}
           </Text>
-          <Text style={[styles.successSub, { color: tokens.textMuted }]}>
+          <Text style={[styles.successSub, { color: theme.textMuted }]}>
             {matchType === 'rival' && rivalMode === 'direct' && selectedRivalTeam
               ? `Tu desafío a ${selectedRivalTeam.name} fue enviado.`
               : matchType === 'rival'
@@ -747,7 +747,7 @@ export function CreateMatchScreen() {
                       : 'Tu revuelta ya está visible.'}
           </Text>
           <Pressable
-            style={[styles.primaryBtn, { backgroundColor: tokens.primaryGreen }]}
+            style={[styles.primaryBtn, { backgroundColor: theme.primary }]}
             onPress={() => router.push('/home')}
           >
             <Text style={[styles.primaryBtnText, { color: revueltaUi.onPrimary }]}>
@@ -800,11 +800,11 @@ export function CreateMatchScreen() {
           : 'Elige un tipo de publicación'
 
   return (
-    <SafeAreaView style={[styles.safe, { backgroundColor: tokens.bgDark }]} edges={['top']}>
+    <SafeAreaView style={[styles.safe, { backgroundColor: theme.bg }]} edges={['top']}>
       <View
         style={[
           styles.topBar,
-          { borderBottomColor: tokens.borderDark },
+          { borderBottomColor: theme.border },
         ]}
       >
         <Pressable
@@ -813,21 +813,20 @@ export function CreateMatchScreen() {
           style={[
             styles.backBtn,
             {
-              backgroundColor:
-                resolved === 'dark' ? 'rgba(255,255,255,0.08)' : '#F3F4F6',
-              borderColor: tokens.borderDark,
+              backgroundColor: theme.inputBg,
+              borderColor: theme.border,
             },
           ]}
         >
-          <Text style={[styles.backBtnText, { color: tokens.textPrimary }]}>
+          <Text style={[styles.backBtnText, { color: theme.text }]}>
             ←
           </Text>
         </Pressable>
         <View style={styles.topBarText}>
-          <Text style={[styles.topTitle, { color: tokens.textPrimary }]}>
+          <Text style={[styles.topTitle, { color: theme.text }]}>
             {topTitle}
           </Text>
-          <Text style={[styles.topSub, { color: tokens.textMuted }]}>{topSub}</Text>
+          <Text style={[styles.topSub, { color: theme.textMuted }]}>{topSub}</Text>
         </View>
       </View>
       <View style={styles.stepProgressWrap}>
@@ -835,8 +834,7 @@ export function CreateMatchScreen() {
           style={[
             styles.stepProgressTrack,
             {
-              backgroundColor:
-                resolved === 'dark' ? 'rgba(255,255,255,0.12)' : '#E5E7EB',
+              backgroundColor: theme.skeleton,
             },
           ]}
         >
@@ -845,7 +843,7 @@ export function CreateMatchScreen() {
               styles.stepProgressFill,
               {
                 width: `${Math.max(12, Math.round((step / totalSteps) * 100))}%`,
-                backgroundColor: tokens.primaryGreen,
+                backgroundColor: theme.primary,
               },
             ]}
           />
@@ -868,7 +866,7 @@ export function CreateMatchScreen() {
               ))}
             </View>
             <Text style={styles.h2}>¿Qué quieres hacer?</Text>
-            <Text style={[styles.h2Sub, { color: tokens.textMuted }]}>
+            <Text style={[styles.h2Sub, { color: theme.textMuted }]}>
               Selecciona el tipo de partido para continuar
             </Text>
             <TypeCard
@@ -972,7 +970,7 @@ export function CreateMatchScreen() {
                   backgroundColor: revueltaUi.surface,
                   borderColor:
                     teamPickKind === 'team_pick_public'
-                      ? tokens.primaryGreen
+                      ? theme.primary
                       : revueltaUi.border,
                 },
               ]}
@@ -981,10 +979,10 @@ export function CreateMatchScreen() {
               <View
                 style={[
                   styles.teamPickTypeIconBox,
-                  { backgroundColor: `${tokens.primaryGreen}22` },
+                  { backgroundColor: `${theme.primary}22` },
                 ]}
               >
-                <Ionicons name="globe-outline" size={22} color={tokens.primaryGreen} />
+                <Ionicons name="globe-outline" size={22} color={theme.primary} />
               </View>
               <View style={styles.teamPickTypeTextCol}>
                 <Text style={[styles.teamPickTypeTitle, { color: revueltaUi.text }]}>
@@ -1001,11 +999,11 @@ export function CreateMatchScreen() {
                   {
                     borderColor:
                       teamPickKind === 'team_pick_public'
-                        ? tokens.primaryGreen
+                        ? theme.primary
                         : revueltaUi.border,
                   },
                   teamPickKind === 'team_pick_public' && {
-                    backgroundColor: tokens.primaryGreen,
+                    backgroundColor: theme.primary,
                   },
                 ]}
               />
@@ -1017,7 +1015,7 @@ export function CreateMatchScreen() {
                   backgroundColor: revueltaUi.surface,
                   borderColor:
                     teamPickKind === 'team_pick_private'
-                      ? tokens.danger
+                      ? theme.danger
                       : revueltaUi.border,
                 },
               ]}
@@ -1029,7 +1027,7 @@ export function CreateMatchScreen() {
                   { backgroundColor: 'rgba(239,68,68,0.15)' },
                 ]}
               >
-                <Ionicons name="lock-closed-outline" size={22} color={tokens.danger} />
+                <Ionicons name="lock-closed-outline" size={22} color={theme.danger} />
               </View>
               <View style={styles.teamPickTypeTextCol}>
                 <Text style={[styles.teamPickTypeTitle, { color: revueltaUi.text }]}>
@@ -1046,11 +1044,11 @@ export function CreateMatchScreen() {
                   {
                     borderColor:
                       teamPickKind === 'team_pick_private'
-                        ? tokens.danger
+                        ? theme.danger
                         : revueltaUi.border,
                   },
                   teamPickKind === 'team_pick_private' && {
-                    backgroundColor: tokens.danger,
+                    backgroundColor: theme.danger,
                   },
                 ]}
               />
@@ -1058,7 +1056,7 @@ export function CreateMatchScreen() {
             <Pressable
               style={[
                 styles.revueltaPublishBtn,
-                { backgroundColor: tokens.primaryGreen, marginTop: 20 },
+                { backgroundColor: theme.primary, marginTop: 20 },
               ]}
               onPress={() => setStep(3)}
             >
@@ -1073,7 +1071,7 @@ export function CreateMatchScreen() {
           <View style={styles.section}>
             <Text style={styles.h2}>Tu equipo</Text>
             <View style={styles.embeddedListWrap}>
-              <FlashList
+              <FlatList
                 data={userTeams}
                 keyExtractor={(t) => t.id}
                 renderItem={renderUserTeamRow}
@@ -1129,7 +1127,7 @@ export function CreateMatchScreen() {
                   <Text style={styles.muted}>No hay equipos con ese criterio.</Text>
                 ) : (
                   <View style={styles.embeddedListWrap}>
-                    <FlashList
+                    <FlatList
                       data={rivalTeams}
                       keyExtractor={(t) => t.id}
                       renderItem={renderRivalTeamRow}
@@ -1229,7 +1227,7 @@ export function CreateMatchScreen() {
               onPress={() => void handleSubmit()}
             >
               {submitting ? (
-                <ActivityIndicator color="#fff" />
+                <ActivityIndicator color={theme.primaryBtnText} />
               ) : (
                 <Text style={styles.primaryBtnText}>
                   {rivalMode === 'direct'
@@ -1448,8 +1446,8 @@ export function CreateMatchScreen() {
                       styles.revueltaRoleBtn,
                       { borderColor: revueltaUi.border },
                       !creatorIsGoalkeeper && {
-                        backgroundColor: tokens.primaryGreen,
-                        borderColor: tokens.primaryGreen,
+                        backgroundColor: theme.primary,
+                        borderColor: theme.primary,
                       },
                       creatorIsGoalkeeper && {
                         backgroundColor: revueltaUi.inputBg,
@@ -1475,8 +1473,8 @@ export function CreateMatchScreen() {
                       styles.revueltaRoleBtn,
                       { borderColor: revueltaUi.border },
                       creatorIsGoalkeeper && {
-                        backgroundColor: tokens.primaryGreen,
-                        borderColor: tokens.primaryGreen,
+                        backgroundColor: theme.primary,
+                        borderColor: theme.primary,
                       },
                       !creatorIsGoalkeeper && {
                         backgroundColor: revueltaUi.inputBg,
@@ -1544,10 +1542,10 @@ export function CreateMatchScreen() {
                       value={bookCourtSlot}
                       onValueChange={setBookCourtSlot}
                       trackColor={{
-                        false: isDark ? '#3f3f46' : '#d4d4d8',
-                        true: tokens.primaryGreen,
+                        false: theme.isDark ? '#3f3f46' : '#d4d4d8',
+                        true: theme.primary,
                       }}
-                      thumbColor={isDark ? '#fafafa' : '#fff'}
+                      thumbColor={theme.isDark ? '#fafafa' : '#fff'}
                     />
                   </View>
                 ) : null}
@@ -1616,7 +1614,7 @@ export function CreateMatchScreen() {
                       onPress={() => setTimeModal(true)}
                     >
                       {linkedVenueId && formData.date && loadingVenueTimes ? (
-                        <ActivityIndicator color={tokens.primaryGreen} />
+                        <ActivityIndicator color={theme.primary} />
                       ) : (
                         <Text
                           style={[
@@ -1659,7 +1657,7 @@ export function CreateMatchScreen() {
                   value={formData.level}
                   onChange={(l) => setFormData({ ...formData, level: l })}
                   variant="revuelta"
-                  accent={tokens.primaryGreen}
+                  accent={theme.primary}
                   labelColor={revueltaUi.text}
                   mutedColor={revueltaUi.muted}
                 />
@@ -1667,7 +1665,7 @@ export function CreateMatchScreen() {
                   style={[
                     styles.revueltaPublishBtn,
                     {
-                      backgroundColor: tokens.primaryGreen,
+                      backgroundColor: theme.primary,
                     },
                     (!formData.venue ||
                       !dateTimeValid ||
@@ -1766,7 +1764,7 @@ export function CreateMatchScreen() {
                   onPress={() => void handleSubmit()}
                 >
                   {submitting ? (
-                    <ActivityIndicator color="#fff" />
+                    <ActivityIndicator color={theme.primaryBtnText} />
                   ) : (
                     <Text style={styles.primaryBtnText}>Publicar búsqueda</Text>
                   )}
@@ -1890,9 +1888,7 @@ export function CreateMatchScreen() {
                     style={[
                       styles.teamPickColorCard,
                       {
-                        backgroundColor: isDark
-                          ? 'rgba(255,255,255,0.06)'
-                          : '#F3F4F6',
+                        backgroundColor: theme.inputBg,
                         borderColor: revueltaUi.border,
                       },
                     ]}
@@ -1913,12 +1909,10 @@ export function CreateMatchScreen() {
                               styles.teamPickShieldOuter,
                               {
                                 borderColor: sel
-                                  ? tokens.primaryGreen
+                                  ? theme.primary
                                   : revueltaUi.border,
                                 backgroundColor: whiteKit
-                                  ? isDark
-                                    ? '#4b5563'
-                                    : '#E5E7EB'
+                                  ? theme.skeleton
                                   : revueltaUi.teamPickRoleOffBg,
                               },
                               sel && styles.teamPickShieldOuterOn,
@@ -1937,9 +1931,7 @@ export function CreateMatchScreen() {
                     style={[
                       styles.teamPickColorCard,
                       {
-                        backgroundColor: isDark
-                          ? 'rgba(255,255,255,0.06)'
-                          : '#F3F4F6',
+                        backgroundColor: theme.inputBg,
                         borderColor: revueltaUi.border,
                       },
                     ]}
@@ -1960,12 +1952,10 @@ export function CreateMatchScreen() {
                               styles.teamPickShieldOuter,
                               {
                                 borderColor: sel
-                                  ? tokens.primaryGreen
+                                  ? theme.primary
                                   : revueltaUi.border,
                                 backgroundColor: whiteKit
-                                  ? isDark
-                                    ? '#4b5563'
-                                    : '#E5E7EB'
+                                  ? theme.skeleton
                                   : revueltaUi.teamPickRoleOffBg,
                               },
                               sel && styles.teamPickShieldOuterOn,
@@ -2020,10 +2010,10 @@ export function CreateMatchScreen() {
                     value={bookCourtSlot}
                     onValueChange={setBookCourtSlot}
                     trackColor={{
-                      false: isDark ? '#3f3f46' : '#d4d4d8',
-                      true: tokens.primaryGreen,
+                      false: theme.isDark ? '#3f3f46' : '#d4d4d8',
+                      true: theme.primary,
                     }}
-                    thumbColor={isDark ? '#fafafa' : '#fff'}
+                    thumbColor={theme.isDark ? '#fafafa' : '#fff'}
                   />
                 </View>
               ) : null}
@@ -2092,7 +2082,7 @@ export function CreateMatchScreen() {
                     onPress={() => setTimeModal(true)}
                   >
                     {linkedVenueId && formData.date && loadingVenueTimes ? (
-                      <ActivityIndicator color={tokens.primaryGreen} />
+                      <ActivityIndicator color={theme.primary} />
                     ) : (
                       <Text
                         style={[
@@ -2130,14 +2120,14 @@ export function CreateMatchScreen() {
                 value={formData.level}
                 onChange={(l) => setFormData({ ...formData, level: l })}
                 variant="revuelta"
-                accent={tokens.primaryGreen}
+                accent={theme.primary}
                 labelColor={revueltaUi.text}
                 mutedColor={revueltaUi.muted}
               />
               <Pressable
                 style={[
                   styles.teamPickPublishBtn,
-                  { backgroundColor: tokens.primaryGreen },
+                  { backgroundColor: theme.primary },
                   (!formData.venue ||
                     !dateTimeValid ||
                     !selectedVenueHasChosenTime ||
@@ -2154,7 +2144,7 @@ export function CreateMatchScreen() {
                 onPress={() => void handleSubmit()}
               >
                 {submitting ? (
-                  <ActivityIndicator color="#FFFFFF" />
+                  <ActivityIndicator color={theme.primaryBtnText} />
                 ) : (
                   <Text style={styles.teamPickPublishText}>
                     Publicar selección de equipos
@@ -2223,26 +2213,26 @@ export function CreateMatchScreen() {
             style={[
               styles.modalSheet,
               {
-                backgroundColor: tokens.cardDark,
-                borderTopColor: tokens.borderDark,
+                backgroundColor: theme.card,
+                borderTopColor: theme.border,
               },
             ]}
           >
             <Text
               style={[
                 styles.modalTitle,
-                { color: tokens.textPrimary, borderBottomColor: tokens.borderDark },
+                { color: theme.text, borderBottomColor: theme.border },
               ]}
             >
               Centro deportivo
             </Text>
             <View style={styles.modalListWrap}>
-              <FlashList
+              <FlatList
                 data={sportsVenuesFromDb}
                 keyExtractor={(v) => v.id}
                 renderItem={renderVenueModalRow}
                 ListEmptyComponent={
-                  <Text style={[styles.muted, { color: tokens.textMuted }]}>
+                  <Text style={[styles.muted, { color: theme.textMuted }]}>
                     No hay centros registrados.
                   </Text>
                 }
@@ -2252,7 +2242,7 @@ export function CreateMatchScreen() {
               style={styles.modalClose}
               onPress={() => setVenueModal(false)}
             >
-              <Text style={[styles.modalCloseText, { color: tokens.primaryGreen }]}>
+              <Text style={[styles.modalCloseText, { color: theme.primary }]}>
                 Cerrar
               </Text>
             </Pressable>
@@ -2266,29 +2256,29 @@ export function CreateMatchScreen() {
             style={[
               styles.modalSheet,
               {
-                backgroundColor: tokens.cardDark,
-                borderTopColor: tokens.borderDark,
+                backgroundColor: theme.card,
+                borderTopColor: theme.border,
               },
             ]}
           >
             <Text
               style={[
                 styles.modalTitle,
-                { color: tokens.textPrimary, borderBottomColor: tokens.borderDark },
+                { color: theme.text, borderBottomColor: theme.border },
               ]}
             >
               Hora
             </Text>
             {linkedVenueId && formData.date && loadingVenueTimes ? (
-              <ActivityIndicator style={{ margin: 24 }} color={tokens.primaryGreen} />
+              <ActivityIndicator style={{ margin: 24 }} color={theme.primary} />
             ) : (
               <View style={styles.modalListWrap}>
-                <FlashList
+                <FlatList
                   data={timeOptionsForPicker}
                   keyExtractor={(x) => x.value}
                   renderItem={renderTimeModalRow}
                   ListEmptyComponent={
-                    <Text style={[styles.muted, { color: tokens.textMuted }]}>
+                    <Text style={[styles.muted, { color: theme.textMuted }]}>
                       Sin horarios.
                     </Text>
                   }
@@ -2299,7 +2289,7 @@ export function CreateMatchScreen() {
               style={styles.modalClose}
               onPress={() => setTimeModal(false)}
             >
-              <Text style={[styles.modalCloseText, { color: tokens.primaryGreen }]}>
+              <Text style={[styles.modalCloseText, { color: theme.primary }]}>
                 Cerrar
               </Text>
             </Pressable>
@@ -2308,6 +2298,12 @@ export function CreateMatchScreen() {
       </Modal>
     </SafeAreaView>
   )
+}
+
+function useThemedStyles() {
+  const theme = useScreenTheme()
+  const styles = useMemo(() => createStyles(theme), [theme])
+  return { theme, styles }
 }
 
 function RevFieldIconLabel({
@@ -2321,6 +2317,7 @@ function RevFieldIconLabel({
   accent: string
   labelColor: string
 }) {
+  const { styles } = useThemedStyles()
   return (
     <View style={styles.revFieldIconRow}>
       <Ionicons name={icon} size={18} color={accent} />
@@ -2344,16 +2341,7 @@ function TypeCard({
   tone: 'red' | 'blue' | 'teal' | 'gold'
   icon: keyof typeof Ionicons.glyphMap
 }) {
-  const { resolved } = useThemePreference()
-  const isDark = resolved === 'dark'
-  const border =
-    tone === 'red'
-      ? styles.typeRed
-      : tone === 'teal'
-        ? styles.typeTeal
-        : tone === 'gold'
-          ? styles.typeGold
-          : styles.typeBlue
+  const { theme, styles } = useThemedStyles()
   const accent =
     tone === 'red'
       ? '#3B82F6'
@@ -2362,9 +2350,17 @@ function TypeCard({
         : tone === 'gold'
           ? '#D9A429'
           : '#36A2EB'
-  const cardBg = isDark ? '#12161B' : '#FFFFFF'
-  const cardBorder = isDark ? '#29303A' : '#E5E7EB'
-  const iconBg = isDark ? `${accent}22` : `${accent}20`
+  const cardBg = theme.cardElevated
+  const cardBorder = theme.border
+  const iconBg = theme.isDark ? `${accent}22` : `${accent}20`
+  const border =
+    tone === 'red'
+      ? styles.typeRed
+      : tone === 'teal'
+        ? styles.typeTeal
+        : tone === 'gold'
+          ? styles.typeGold
+          : styles.typeBlue
   const disabledTone = title === 'Buscar jugadores' && desc.includes('pausado')
   return (
     <Pressable
@@ -2384,7 +2380,6 @@ function TypeCard({
           <Text
             style={[
               styles.typeTitle,
-              isDark && { color: '#F3F4F6' },
               disabledTone && !selected && styles.typeTitleMuted,
             ]}
           >
@@ -2393,7 +2388,6 @@ function TypeCard({
           <Text
             style={[
               styles.typeDesc,
-              isDark && { color: '#9CA3AF' },
               disabledTone && !selected && styles.typeDescMuted,
             ]}
           >
@@ -2401,8 +2395,8 @@ function TypeCard({
           </Text>
         </View>
         {selected ? (
-          <View style={[styles.typeCheck, { backgroundColor: '#7DD064' }]}>
-            <Ionicons name="checkmark" size={16} color="#102015" />
+          <View style={[styles.typeCheck, { backgroundColor: theme.success }]}>
+            <Ionicons name="checkmark" size={16} color={theme.primaryBtnText} />
           </View>
         ) : null}
       </View>
@@ -2419,6 +2413,7 @@ function VenueRow({
   venue: string
   onPress: () => void
 }) {
+  const { styles } = useThemedStyles()
   return (
     <View style={styles.fieldBlock}>
       <Text style={styles.label}>{label}</Text>
@@ -2442,6 +2437,7 @@ function TimeRow({
   loading?: boolean
   onPress: () => void
 }) {
+  const { styles } = useThemedStyles()
   return (
     <View style={styles.fieldBlock}>
       <Text style={styles.label}>{label}</Text>
@@ -2471,6 +2467,7 @@ function LevelGrid({
   labelColor?: string
   mutedColor?: string
 }) {
+  const { theme, styles } = useThemedStyles()
   return (
     <View style={styles.levelGrid}>
       {LEVELS.map((lvl) => {
@@ -2501,7 +2498,7 @@ function LevelGrid({
                 styles.levelCellText,
                 variant === 'revuelta' &&
                   !selected && {
-                    color: labelColor ?? mutedColor ?? '#374151',
+                    color: labelColor ?? mutedColor ?? theme.text,
                   },
                 selected &&
                   (variant === 'revuelta' && accent
@@ -2518,16 +2515,17 @@ function LevelGrid({
   )
 }
 
-const styles = StyleSheet.create({
-  safe: { flex: 1, backgroundColor: '#fff' },
-  gate: { padding: 24, textAlign: 'center', color: '#6b7280' },
+function createStyles(theme: ReturnType<typeof useScreenTheme>) {
+  return StyleSheet.create({
+  safe: { flex: 1, backgroundColor: theme.bg },
+  gate: { padding: 24, textAlign: 'center', color: theme.textMuted },
   topBar: {
     flexDirection: 'row',
     alignItems: 'center',
     paddingHorizontal: 12,
     paddingVertical: 12,
     borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: '#e5e7eb',
+    borderBottomColor: theme.border,
   },
   backBtn: {
     padding: 8,
@@ -2538,10 +2536,10 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  backBtnText: { fontSize: 22, color: '#374151' },
+  backBtnText: { fontSize: 22, color: theme.text },
   topBarText: { marginLeft: 8 },
-  topTitle: { fontSize: 22, fontWeight: '800', color: '#111' },
-  topSub: { fontSize: 13, color: '#6b7280' },
+  topTitle: { fontSize: 22, fontWeight: '800', color: theme.text },
+  topSub: { fontSize: 13, color: theme.textMuted },
   stepProgressWrap: { paddingHorizontal: 16, paddingTop: 10, paddingBottom: 4 },
   stepProgressTrack: {
     height: 8,
@@ -2562,15 +2560,15 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: 'rgba(37, 99, 235, 0.2)',
   },
-  infoTitle: { fontWeight: '700', marginBottom: 8, color: '#111' },
-  infoLine: { fontSize: 12, color: '#4b5563', marginBottom: 6 },
-  h2: { fontSize: 20, fontWeight: '800', color: '#111', marginTop: 4 },
+  infoTitle: { fontWeight: '700', marginBottom: 8, color: theme.text },
+  infoLine: { fontSize: 12, color: theme.textMuted, marginBottom: 6 },
+  h2: { fontSize: 20, fontWeight: '800', color: theme.text, marginTop: 4 },
   h2Sub: { fontSize: 16, marginTop: -6, marginBottom: 6 },
   typeCard: {
     padding: 14,
     borderRadius: 26,
     borderWidth: 1.5,
-    borderColor: '#e5e7eb',
+    borderColor: theme.border,
     marginBottom: 2,
   },
   typeRed: {
@@ -2609,10 +2607,10 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   typeTextCol: { flex: 1 },
-  typeTitle: { fontSize: 17, fontWeight: '800', color: '#111' },
-  typeTitleMuted: { color: '#6B7280' },
-  typeDesc: { fontSize: 15, color: '#6b7280', marginTop: 2 },
-  typeDescMuted: { color: '#9CA3AF' },
+  typeTitle: { fontSize: 17, fontWeight: '800', color: theme.text },
+  typeTitleMuted: { color: theme.textMuted },
+  typeDesc: { fontSize: 15, color: theme.textMuted, marginTop: 2 },
+  typeDescMuted: { color: theme.textMuted },
   typeCheck: {
     width: 34,
     height: 34,
@@ -2621,79 +2619,90 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   primaryBtn: {
-    backgroundColor: '#0F4539',
+    backgroundColor: theme.primary,
     paddingVertical: 16,
     borderRadius: 999,
     alignItems: 'center',
     marginTop: 12,
-    shadowColor: '#0F4539',
+    shadowColor: theme.primary,
     shadowOffset: { width: 0, height: 6 },
     shadowOpacity: 0.25,
     shadowRadius: 14,
     elevation: 4,
   },
   dangerBtn: {
-    backgroundColor: '#dc2626',
+    backgroundColor: theme.danger,
     paddingVertical: 14,
     borderRadius: 12,
     alignItems: 'center',
     marginTop: 12,
   },
-  primaryBtnText: { color: '#FFFFFF', fontSize: 16, fontWeight: '800' },
+  primaryBtnText: { color: theme.primaryBtnText, fontSize: 16, fontWeight: '800' },
   btnDisabled: { opacity: 0.45 },
   teamCard: {
     padding: 14,
     borderRadius: 12,
     borderWidth: 1,
-    borderColor: '#e5e7eb',
+    borderColor: theme.border,
     marginBottom: 8,
   },
-  teamCardOn: { borderColor: '#2563eb', borderWidth: 2 },
-  teamCardRivalOn: { borderColor: '#dc2626', borderWidth: 2 },
-  teamName: { fontSize: 16, fontWeight: '700', color: '#111' },
-  teamMeta: { fontSize: 13, color: '#6b7280', marginTop: 4 },
+  teamCardOn: {
+    borderColor: theme.primary,
+    borderWidth: 2,
+    backgroundColor: theme.isDark ? 'rgba(37,99,235,0.12)' : 'rgba(37,99,235,0.06)',
+  },
+  teamCardRivalOn: {
+    borderColor: theme.danger,
+    borderWidth: 2,
+    backgroundColor: theme.isDark ? 'rgba(220,38,38,0.12)' : 'rgba(220,38,38,0.06)',
+  },
+  teamName: { fontSize: 16, fontWeight: '700', color: theme.text },
+  teamMeta: { fontSize: 13, color: theme.textMuted, marginTop: 4 },
   modeRow: { flexDirection: 'row', gap: 8 },
   modeBtn: {
     flex: 1,
     padding: 12,
     borderRadius: 12,
     borderWidth: 2,
-    borderColor: '#e5e7eb',
+    borderColor: theme.border,
     alignItems: 'center',
   },
-  modeBtnOn: { borderColor: '#2563eb', backgroundColor: 'rgba(37,99,235,0.08)' },
-  modeBtnDirect: {
-    borderColor: '#dc2626',
-    backgroundColor: 'rgba(220,38,38,0.08)',
+  modeBtnOn: {
+    borderColor: theme.primary,
+    backgroundColor: theme.isDark ? 'rgba(37,99,235,0.16)' : 'rgba(37,99,235,0.08)',
   },
-  modeBtnText: { fontSize: 13, fontWeight: '600', color: '#111' },
+  modeBtnDirect: {
+    borderColor: theme.danger,
+    backgroundColor: theme.isDark ? 'rgba(220,38,38,0.14)' : 'rgba(220,38,38,0.08)',
+  },
+  modeBtnText: { fontSize: 13, fontWeight: '600', color: theme.text },
   input: {
     borderWidth: 1,
-    borderColor: '#e5e7eb',
+    borderColor: theme.border,
     borderRadius: 10,
     padding: 12,
     fontSize: 16,
-    backgroundColor: '#f9fafb',
+    backgroundColor: theme.bg,
   },
   textArea: {
     borderWidth: 1,
-    borderColor: '#e5e7eb',
+    borderColor: theme.border,
     borderRadius: 10,
     padding: 12,
     minHeight: 80,
     textAlignVertical: 'top',
-    backgroundColor: '#f9fafb',
+    backgroundColor: theme.bg,
   },
-  label: { fontSize: 14, fontWeight: '600', color: '#374151', marginTop: 8 },
+  label: { fontSize: 14, fontWeight: '600', color: theme.text, marginTop: 8 },
   fieldBlock: { marginTop: 8 },
   pickerBtn: {
     borderWidth: 1,
-    borderColor: '#e5e7eb',
+    borderColor: theme.border,
     borderRadius: 10,
     padding: 14,
-    backgroundColor: '#f9fafb',
+    backgroundColor: theme.bg,
   },
-  pickerBtnText: { fontSize: 16, color: '#111' },
+  pickerBtnText: { fontSize: 16, color: theme.text },
   vsBox: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -2701,10 +2710,10 @@ const styles = StyleSheet.create({
     padding: 16,
     borderRadius: 14,
     borderWidth: 1,
-    borderColor: '#e5e7eb',
+    borderColor: theme.border,
   },
-  vs: { fontSize: 20, fontWeight: '800', color: '#0891b2' },
-  help: { fontSize: 12, color: '#6b7280', marginTop: 4 },
+  vs: { fontSize: 20, fontWeight: '800', color: theme.accent },
+  help: { fontSize: 12, color: theme.textMuted, marginTop: 4 },
   altBox: {
     marginTop: 10,
     padding: 12,
@@ -2713,34 +2722,37 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: 'rgba(245, 158, 11, 0.35)',
   },
-  altTitle: { fontSize: 14, fontWeight: '600', color: '#111' },
-  altSub: { fontSize: 12, color: '#6b7280', marginTop: 6 },
+  altTitle: { fontSize: 14, fontWeight: '600', color: theme.text },
+  altSub: { fontSize: 12, color: theme.textMuted, marginTop: 6 },
   altChips: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 8 },
   altChip: {
     paddingHorizontal: 12,
     paddingVertical: 8,
     borderRadius: 999,
     borderWidth: 1,
-    borderColor: '#d1d5db',
-    backgroundColor: '#fff',
+    borderColor: theme.border,
+    backgroundColor: theme.card,
   },
-  altChipText: { fontSize: 12, color: '#111' },
+  altChipText: { fontSize: 12, color: theme.text },
   levelGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
   levelCell: {
     width: '47%',
     padding: 12,
     borderRadius: 12,
     borderWidth: 2,
-    borderColor: '#e5e7eb',
+    borderColor: theme.border,
     alignItems: 'center',
   },
-  levelCellOn: { borderColor: '#2563eb', backgroundColor: 'rgba(37,99,235,0.08)' },
-  levelCellRival: {
-    borderColor: '#dc2626',
-    backgroundColor: 'rgba(220,38,38,0.08)',
+  levelCellOn: {
+    borderColor: theme.primary,
+    backgroundColor: theme.isDark ? 'rgba(37,99,235,0.16)' : 'rgba(37,99,235,0.08)',
   },
-  levelCellText: { fontSize: 14, fontWeight: '600', color: '#374151' },
-  levelCellTextOn: { color: '#111' },
+  levelCellRival: {
+    borderColor: theme.danger,
+    backgroundColor: theme.isDark ? 'rgba(220,38,38,0.14)' : 'rgba(220,38,38,0.08)',
+  },
+  levelCellText: { fontSize: 14, fontWeight: '600', color: theme.text },
+  levelCellTextOn: { color: theme.text },
   counterRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -2753,7 +2765,7 @@ const styles = StyleSheet.create({
     height: 48,
     borderRadius: 12,
     borderWidth: 1,
-    borderColor: '#d1d5db',
+    borderColor: theme.border,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -2763,37 +2775,40 @@ const styles = StyleSheet.create({
     padding: 14,
     borderRadius: 12,
     borderWidth: 2,
-    borderColor: '#e5e7eb',
+    borderColor: theme.border,
     marginBottom: 8,
   },
-  seekCardOn: { borderColor: '#2563eb', backgroundColor: 'rgba(37,99,235,0.06)' },
+  seekCardOn: {
+    borderColor: theme.primary,
+    backgroundColor: theme.isDark ? 'rgba(37,99,235,0.14)' : 'rgba(37,99,235,0.06)',
+  },
   summaryBox: {
     padding: 12,
     borderRadius: 10,
-    backgroundColor: '#f3f4f6',
+    backgroundColor: theme.chipBg,
     borderWidth: 1,
-    borderColor: '#e5e7eb',
+    borderColor: theme.border,
   },
-  summaryText: { fontSize: 14, color: '#374151' },
+  summaryText: { fontSize: 14, color: theme.text },
   switchRow: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
     marginTop: 8,
   },
-  switchLabel: { fontSize: 14, color: '#374151', flex: 1 },
-  muted: { fontSize: 14, color: '#6b7280' },
+  switchLabel: { fontSize: 14, color: theme.text, flex: 1 },
+  muted: { fontSize: 14, color: theme.textMuted },
   success: { flex: 1, justifyContent: 'center', padding: 24, alignItems: 'center' },
   successIcon: {
     fontSize: 48,
-    color: '#16a34a',
+    color: theme.success,
     fontWeight: '800',
     marginBottom: 16,
   },
-  successTitle: { fontSize: 22, fontWeight: '800', color: '#111' },
+  successTitle: { fontSize: 22, fontWeight: '800', color: theme.text },
   successSub: {
     fontSize: 15,
-    color: '#6b7280',
+    color: theme.textMuted,
     textAlign: 'center',
     marginTop: 10,
     marginBottom: 24,
@@ -2801,10 +2816,10 @@ const styles = StyleSheet.create({
   modalWrap: {
     flex: 1,
     justifyContent: 'flex-end',
-    backgroundColor: 'rgba(0,0,0,0.45)',
+    backgroundColor: theme.overlay,
   },
   modalSheet: {
-    backgroundColor: '#fff',
+    backgroundColor: theme.card,
     borderTopLeftRadius: 16,
     borderTopRightRadius: 16,
     maxHeight: '70%',
@@ -2821,12 +2836,12 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     padding: 16,
     borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: '#e5e7eb',
+    borderBottomColor: theme.border,
   },
   modalRow: { paddingVertical: 14, paddingHorizontal: 16 },
-  modalRowText: { fontSize: 16, color: '#111' },
+  modalRowText: { fontSize: 16, color: theme.text },
   modalClose: { padding: 16, alignItems: 'center' },
-  modalCloseText: { color: '#2563eb', fontSize: 16, fontWeight: '600' },
+  modalCloseText: { color: theme.link, fontSize: 16, fontWeight: '600' },
   teamPickTypeCard: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -2941,7 +2956,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   teamPickPublishText: {
-    color: '#FFFFFF',
+    color: theme.primaryBtnText,
     fontSize: 17,
     fontWeight: '800',
   },
@@ -3090,3 +3105,4 @@ const styles = StyleSheet.create({
     fontWeight: '700',
   },
 })
+}

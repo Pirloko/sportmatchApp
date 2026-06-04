@@ -8,6 +8,7 @@ import { AppProvider } from '../lib/app-provider';
 import { PushBootstrap } from '../lib/push/bootstrap';
 import { TelemetryBootstrap } from '../lib/telemetry/bootstrap';
 import { ThemeProvider, useThemePreference } from '../lib/theme-context';
+import { buildScreenTheme, navigationThemeOptions } from '../lib/theme-ui';
 import { AppQueryProvider } from '../src/app/providers/query-provider';
 
 function RootLayout() {
@@ -22,6 +23,8 @@ export default Sentry.wrap(RootLayout);
 
 function RootLayoutWithTheme() {
   const { resolved, tokens } = useThemePreference();
+  const theme = buildScreenTheme(tokens, resolved);
+  const nav = navigationThemeOptions(theme);
   return (
     <AppQueryProvider>
       <AppProvider>
@@ -31,7 +34,7 @@ function RootLayoutWithTheme() {
         <Stack
           screenOptions={{
             headerShown: true,
-            contentStyle: { backgroundColor: tokens.bgDark },
+            ...nav,
           }}
         >
           <Stack.Screen name="index" options={{ headerShown: false }} />
@@ -45,6 +48,15 @@ function RootLayoutWithTheme() {
           <Stack.Screen name="centro" options={{ headerShown: false }} />
           <Stack.Screen name="admin" options={{ title: 'Admin', headerShown: false }} />
           <Stack.Screen name="equipo" options={{ title: 'Equipo', headerShown: false }} />
+          <Stack.Screen
+            name="notificaciones"
+            options={{ title: 'Notificaciones', headerShown: false }}
+          />
+          <Stack.Screen
+            name="privacy-policy"
+            options={{ title: 'Política de Privacidad' }}
+          />
+          <Stack.Screen name="terms" options={{ title: 'Términos de Uso' }} />
         </Stack>
       </AppProvider>
     </AppQueryProvider>

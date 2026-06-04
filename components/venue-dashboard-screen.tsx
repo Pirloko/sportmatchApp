@@ -15,8 +15,8 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context'
 
 import { useApp } from '../lib/app-provider'
-import { useThemePreference } from '../lib/theme-context'
-import { createClient, isSupabaseConfigured } from '../lib/supabase/client'
+import { useScreenTheme } from '../lib/theme-ui'
+import { getSupabase, isSupabaseConfigured } from '../lib/supabase/client'
 import {
   fetchVenueCourts,
   fetchVenueForOwner,
@@ -64,8 +64,9 @@ function publicUrlForVenue(venueId: string): string {
 }
 
 export function VenueDashboardScreen() {
-  const { currentUser, logout } = useApp()
-  const { tokens } = useThemePreference()
+  const { currentUser, logout, deleteAccount } = useApp()
+  const theme = useScreenTheme()
+  const styles = useMemo(() => createStyles(theme), [theme])
   const [tab, setTab] = useState<'bookings' | 'profile' | 'courts' | 'hours'>(
     'bookings'
   )
@@ -119,7 +120,7 @@ export function VenueDashboardScreen() {
 
   const reloadAll = useCallback(async () => {
     if (!currentUser || !isSupabaseConfigured()) return
-    const supabase = createClient()
+    const supabase = getSupabase()
     const v = await fetchVenueForOwner(supabase, currentUser.id)
     setVenue(v)
     if (!v) {
@@ -163,7 +164,7 @@ export function VenueDashboardScreen() {
 
   useEffect(() => {
     if (!venue || !isSupabaseConfigured()) return
-    const supabase = createClient()
+    const supabase = getSupabase()
     const d = new Date(dayStr + 'T12:00:00')
     const start = new Date(d)
     start.setHours(0, 0, 0, 0)
@@ -244,7 +245,7 @@ export function VenueDashboardScreen() {
     reservationId: string,
     payload: Record<string, unknown>
   ) => {
-    const supabase = createClient()
+    const supabase = getSupabase()
     const { error } = await supabase
       .from('venue_reservations')
       .update(payload)
@@ -361,7 +362,7 @@ export function VenueDashboardScreen() {
             ? 'Reserva manual confirmada por centro'
             : 'Reserva manual cargada por centro',
       }
-      const supabase = createClient()
+      const supabase = getSupabase()
       const { error } = await supabase.from('venue_reservations').insert(payload)
       if (error) {
         if (error.message.includes('venue_reservation_overlap')) {
@@ -394,7 +395,7 @@ export function VenueDashboardScreen() {
 
   const saveProfile = async () => {
     if (!venue) return
-    const supabase = createClient()
+    const supabase = getSupabase()
     const { error } = await supabase
       .from('sports_venues')
       .update({
@@ -419,7 +420,7 @@ export function VenueDashboardScreen() {
 
   const addCourt = async () => {
     if (!venue || !newCourtName.trim()) return
-    const supabase = createClient()
+    const supabase = getSupabase()
     const nextOrder =
       courts.length > 0 ? Math.max(...courts.map((c) => c.sortOrder)) + 1 : 0
     const { error } = await supabase.from('venue_courts').insert({
@@ -452,7 +453,7 @@ export function VenueDashboardScreen() {
   }
 
   const doRemoveCourt = async (id: string) => {
-    const supabase = createClient()
+    const supabase = getSupabase()
     const { error } = await supabase.from('venue_courts').delete().eq('id', id)
     if (error) {
       Alert.alert('Error', error.message)
@@ -464,7 +465,7 @@ export function VenueDashboardScreen() {
 
   const saveHours = async () => {
     if (!venue) return
-    const supabase = createClient()
+    const supabase = getSupabase()
     for (let d = 0; d <= 6; d++) {
       const cfg = hoursByDay[d]
       const existing = weeklyLoaded.find((h) => h.dayOfWeek === d)
@@ -523,10 +524,48 @@ export function VenueDashboardScreen() {
     }
   }
 
+  const onDeleteAccountPress = () => {
+    Alert.alert(
+      'Eliminar cuenta',
+      'Esta acción eliminará tu cuenta y datos asociados y no se puede deshacer.',
+      [
+        { text: 'Cancelar', style: 'cancel' },
+        {
+          text: 'Continuar',
+          style: 'destructive',
+          onPress: () => {
+            Alert.alert(
+              'Confirmar eliminación',
+              '¿Estás seguro? Se eliminará tu centro y reservas vinculadas a tu cuenta.',
+              [
+                { text: 'Cancelar', style: 'cancel' },
+                {
+                  text: 'Eliminar mi cuenta',
+                  style: 'destructive',
+                  onPress: () => {
+                    void (async () => {
+                      const res = await deleteAccount()
+                      if (!res.ok) {
+                        Alert.alert(
+                          'No se pudo eliminar la cuenta',
+                          res.error ?? 'Inténtalo más tarde.'
+                        )
+                      }
+                    })()
+                  },
+                },
+              ]
+            )
+          },
+        },
+      ]
+    )
+  }
+
   if (!currentUser) return null
 
   return (
-    <SafeAreaView style={[styles.safe, { backgroundColor: tokens.bgDark }]} edges={['top']}>
+    <SafeAreaView style={[styles.safe, { backgroundColor: theme.bg }]} edges={['top']}>
       <View style={styles.header}>
         <View style={styles.headerText}>
           <Text style={styles.h1} numberOfLines={1}>
@@ -716,7 +755,7 @@ export function VenueDashboardScreen() {
                       onPress={() => void createManualReservation()}
                     >
                       {manualSaving ? (
-                        <ActivityIndicator color="#fff" />
+                        <ActivityIndicator color={theme.primaryBtnText} />
                       ) : (
                         <Text style={styles.btnPrimaryText}>Guardar reserva manual</Text>
                       )}
@@ -794,6 +833,9 @@ export function VenueDashboardScreen() {
                 />
                 <Pressable style={styles.btnPrimary} onPress={() => void saveProfile()}>
                   <Text style={styles.btnPrimaryText}>Guardar</Text>
+                </Pressable>
+                <Pressable style={styles.btnDangerOutline} onPress={onDeleteAccountPress}>
+                  <Text style={styles.danger}>Eliminar mi cuenta</Text>
                 </Pressable>
               </View>
             )}
@@ -916,6 +958,12 @@ export function VenueDashboardScreen() {
   )
 }
 
+function useThemedStyles() {
+  const theme = useScreenTheme()
+  const styles = useMemo(() => createStyles(theme), [theme])
+  return { theme, styles }
+}
+
 function Field({
   label,
   value,
@@ -929,6 +977,7 @@ function Field({
   placeholder?: string
   keyboardType?: 'default' | 'phone-pad'
 }) {
+  const { styles, theme } = useThemedStyles()
   return (
     <>
       <Text style={styles.label}>{label}</Text>
@@ -937,6 +986,7 @@ function Field({
         value={value}
         onChangeText={onChange}
         placeholder={placeholder}
+        placeholderTextColor={theme.textMuted}
         keyboardType={keyboardType}
       />
     </>
@@ -965,6 +1015,7 @@ function ReservationCard({
   onConfirm: () => void
   onCancel: () => void
 }) {
+  const { styles } = useThemedStyles()
   const m = r.matchOpportunityId ? matchById.get(r.matchOpportunityId) : undefined
   const org = m
     ? organizerById.get(m.creatorId)
@@ -1053,8 +1104,9 @@ function ReservationCard({
   )
 }
 
-const styles = StyleSheet.create({
-  safe: { flex: 1, backgroundColor: '#fff' },
+function createStyles(theme: ReturnType<typeof useScreenTheme>) {
+  return StyleSheet.create({
+  safe: { flex: 1, backgroundColor: theme.bg },
   header: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -1062,62 +1114,62 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingVertical: 12,
     borderBottomWidth: StyleSheet.hairlineWidth,
-    borderColor: '#e5e7eb',
+    borderColor: theme.border,
   },
   headerText: { flex: 1, marginRight: 12 },
-  h1: { fontSize: 18, fontWeight: '800', color: '#111' },
-  sub: { fontSize: 12, color: '#6b7280', marginTop: 2 },
+  h1: { fontSize: 18, fontWeight: '800', color: theme.text },
+  sub: { fontSize: 12, color: theme.textMuted, marginTop: 2 },
   btnGhost: { padding: 8 },
-  btnGhostText: { fontSize: 15, fontWeight: '600', color: '#2563eb' },
+  btnGhostText: { fontSize: 15, fontWeight: '600', color: theme.link },
   center: { flex: 1, justifyContent: 'center', alignItems: 'center', padding: 24 },
   emptyPad: { padding: 20, gap: 12 },
-  emptyTitle: { fontSize: 16, fontWeight: '700', color: '#111' },
-  emptyBody: { fontSize: 14, color: '#6b7280', lineHeight: 20 },
-  tabs: { maxHeight: 48, borderBottomWidth: StyleSheet.hairlineWidth, borderColor: '#e5e7eb' },
+  emptyTitle: { fontSize: 16, fontWeight: '700', color: theme.text },
+  emptyBody: { fontSize: 14, color: theme.textMuted, lineHeight: 20 },
+  tabs: { maxHeight: 48, borderBottomWidth: StyleSheet.hairlineWidth, borderColor: theme.border },
   tabsContent: { paddingHorizontal: 8, paddingVertical: 8, gap: 6 },
   tab: {
     paddingHorizontal: 14,
     paddingVertical: 8,
     borderRadius: 10,
-    backgroundColor: '#f3f4f6',
+    backgroundColor: theme.chipBg,
     marginRight: 6,
   },
-  tabOn: { backgroundColor: '#2563eb' },
-  tabText: { fontSize: 16, fontWeight: '700', color: '#4b5563' },
-  tabTextOn: { color: '#fff' },
+  tabOn: { backgroundColor: theme.primary },
+  tabText: { fontSize: 16, fontWeight: '700', color: theme.textMuted },
+  tabTextOn: { color: theme.primaryBtnText },
   main: { flex: 1 },
   mainContent: { padding: 16, paddingBottom: 40 },
   section: { gap: 12 },
-  label: { fontSize: 14, fontWeight: '600', color: '#374151' },
-  labelSmall: { fontSize: 12, color: '#6b7280', marginTop: 4 },
+  label: { fontSize: 14, fontWeight: '600', color: theme.text },
+  labelSmall: { fontSize: 12, color: theme.textMuted, marginTop: 4 },
   input: {
     borderWidth: 1,
-    borderColor: '#e5e7eb',
+    borderColor: theme.border,
     borderRadius: 10,
     padding: 12,
     fontSize: 16,
-    color: '#111',
-    backgroundColor: '#fafafa',
+    color: theme.text,
+    backgroundColor: theme.chipBg,
   },
   flex1: { flex: 1 },
   row: { flexDirection: 'row', gap: 8, alignItems: 'center' },
   btnPrimary: {
-    backgroundColor: '#2563eb',
+    backgroundColor: theme.primary,
     borderRadius: 12,
     paddingVertical: 14,
     alignItems: 'center',
   },
   btnPrimarySm: {
-    backgroundColor: '#2563eb',
+    backgroundColor: theme.primary,
     borderRadius: 10,
     paddingVertical: 10,
     paddingHorizontal: 12,
     alignSelf: 'flex-start',
   },
-  btnPrimaryText: { color: '#fff', fontSize: 16, fontWeight: '700' },
+  btnPrimaryText: { color: theme.primaryBtnText, fontSize: 16, fontWeight: '700' },
   btnOutline: {
     borderWidth: 1,
-    borderColor: '#d1d5db',
+    borderColor: theme.border,
     borderRadius: 8,
     paddingVertical: 10,
     paddingHorizontal: 12,
@@ -1125,38 +1177,50 @@ const styles = StyleSheet.create({
   },
   btnOutlineSm: {
     borderWidth: 1,
-    borderColor: '#d1d5db',
+    borderColor: theme.border,
     borderRadius: 8,
     paddingVertical: 10,
     paddingHorizontal: 12,
     alignSelf: 'flex-start',
   },
-  btnOutlineText: { color: '#374151', fontWeight: '600', fontSize: 14 },
+  btnOutlineText: { color: theme.text, fontWeight: '600', fontSize: 14 },
+  btnDangerOutline: {
+    marginTop: 24,
+    borderWidth: 1,
+    borderColor: 'rgba(220, 38, 38, 0.45)',
+    borderRadius: 8,
+    paddingVertical: 12,
+    paddingHorizontal: 12,
+    alignItems: 'center',
+  },
   disabled: { opacity: 0.6 },
   card: {
     borderWidth: 1,
-    borderColor: '#e5e7eb',
+    borderColor: theme.border,
     borderRadius: 12,
     padding: 12,
     gap: 8,
-    backgroundColor: '#fafafa',
+    backgroundColor: theme.chipBg,
   },
-  cardTitle: { fontSize: 15, fontWeight: '700', color: '#111' },
+  cardTitle: { fontSize: 15, fontWeight: '700', color: theme.text },
   chipRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
   chip: {
     paddingHorizontal: 12,
     paddingVertical: 8,
     borderRadius: 10,
     borderWidth: 1,
-    borderColor: '#e5e7eb',
-    backgroundColor: '#fff',
+    borderColor: theme.border,
+    backgroundColor: theme.card,
   },
-  chipOn: { borderColor: '#2563eb', backgroundColor: 'rgba(37, 99, 235, 0.08)' },
-  chipText: { fontSize: 14, color: '#374151' },
-  chipTextOn: { fontWeight: '700', color: '#2563eb' },
-  muted: { fontSize: 14, color: '#6b7280' },
-  mutedSmall: { fontSize: 12, color: '#6b7280', marginTop: 4 },
-  hint: { fontSize: 12, color: '#6b7280', lineHeight: 18 },
+  chipOn: {
+    borderColor: theme.primary,
+    backgroundColor: theme.isDark ? 'rgba(37, 99, 235, 0.2)' : 'rgba(37, 99, 235, 0.08)',
+  },
+  chipText: { fontSize: 14, color: theme.text },
+  chipTextOn: { fontWeight: '700', color: theme.link },
+  muted: { fontSize: 14, color: theme.textMuted },
+  mutedSmall: { fontSize: 12, color: theme.textMuted, marginTop: 4 },
+  hint: { fontSize: 12, color: theme.textMuted, lineHeight: 18 },
   courtRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -1164,48 +1228,48 @@ const styles = StyleSheet.create({
     padding: 12,
     borderRadius: 10,
     borderWidth: 1,
-    borderColor: '#e5e7eb',
-    backgroundColor: '#fff',
+    borderColor: theme.border,
+    backgroundColor: theme.card,
   },
-  courtName: { fontSize: 15, fontWeight: '600', color: '#111' },
-  danger: { color: '#b91c1c', fontWeight: '600' },
-  dayTitle: { fontSize: 15, fontWeight: '700', color: '#111', marginBottom: 4 },
+  courtName: { fontSize: 15, fontWeight: '600', color: theme.text },
+  danger: { color: theme.danger, fontWeight: '600' },
+  dayTitle: { fontSize: 15, fontWeight: '700', color: theme.text, marginBottom: 4 },
   resCard: {
     borderWidth: 1,
-    borderColor: '#e5e7eb',
+    borderColor: theme.border,
     borderRadius: 12,
     padding: 12,
     gap: 8,
-    backgroundColor: '#fff',
+    backgroundColor: theme.card,
   },
-  resCourt: { fontSize: 16, fontWeight: '700', color: '#111' },
-  resTime: { fontSize: 14, color: '#6b7280' },
+  resCourt: { fontSize: 16, fontWeight: '700', color: theme.text },
+  resTime: { fontSize: 14, color: theme.textMuted },
   resMeta: { marginTop: 4, gap: 4 },
-  resTitle: { fontSize: 13, fontWeight: '600', color: '#2563eb' },
-  manualTag: { fontSize: 11, color: '#b45309', fontWeight: '600' },
-  strong: { fontWeight: '700', color: '#111' },
+  resTitle: { fontSize: 13, fontWeight: '600', color: theme.link },
+  manualTag: { fontSize: 11, color: theme.isDark ? '#FBBF24' : '#b45309', fontWeight: '600' },
+  strong: { fontWeight: '700', color: theme.text },
   waBtn: {
     marginTop: 6,
-    backgroundColor: '#16a34a',
+    backgroundColor: theme.success,
     borderRadius: 8,
     paddingVertical: 10,
     alignItems: 'center',
   },
-  waBtnText: { color: '#fff', fontWeight: '700', fontSize: 14 },
+  waBtnText: { color: theme.primaryBtnText, fontWeight: '700', fontSize: 14 },
   resActions: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 8 },
   modalOverlay: {
     flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.45)',
+    backgroundColor: theme.overlay,
     justifyContent: 'center',
     padding: 24,
   },
   modalBox: {
-    backgroundColor: '#fff',
+    backgroundColor: theme.card,
     borderRadius: 14,
     padding: 16,
     gap: 10,
   },
-  modalTitle: { fontSize: 17, fontWeight: '700', color: '#111' },
+  modalTitle: { fontSize: 17, fontWeight: '700', color: theme.text },
   modalInput: { minHeight: 80, textAlignVertical: 'top' },
   modalActions: {
     flexDirection: 'row',
@@ -1214,3 +1278,4 @@ const styles = StyleSheet.create({
     marginTop: 8,
   },
 })
+}

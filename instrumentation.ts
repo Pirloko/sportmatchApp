@@ -1,5 +1,10 @@
 /**
  * Debe importarse antes que el resto de la app (p. ej. al inicio de `app/_layout.tsx`).
+ * Polyfills Web Crypto → PKCE S256 antes que Supabase.
+ */
+import './lib/supabase/polyfills'
+
+/**
  * Inicializa Sentry solo si existe `EXPO_PUBLIC_SENTRY_DSN`.
  */
 import * as Sentry from '@sentry/react-native'

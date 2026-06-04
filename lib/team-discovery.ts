@@ -37,6 +37,37 @@ export function teamIsInPlayerGeo(user: User, team: Team): boolean {
   return false
 }
 
+/**
+ * Jugador en la misma región que quien ve el ranking (no todo el país).
+ */
+export function playerIsInSameRegion(viewer: User, candidate: User): boolean {
+  if (viewer.homeRegionId && candidate.homeRegionId) {
+    return viewer.homeRegionId === candidate.homeRegionId
+  }
+  if (viewer.homeRegionId) return false
+  const userCityKey = normalizeLocationKey(viewer.city)
+  const candCityKey = normalizeLocationKey(candidate.city)
+  if (userCityKey && candCityKey) {
+    if (userCityKey === candCityKey) return true
+    if (candCityKey.includes(userCityKey)) return true
+    if (userCityKey.includes(candCityKey)) return true
+  }
+  if (viewer.cityId && candidate.cityId) {
+    return viewer.cityId === candidate.cityId
+  }
+  return false
+}
+
+/**
+ * Equipo en la misma región que quien ve el ranking.
+ */
+export function teamIsInSameRegion(user: User, team: Team): boolean {
+  if (user.homeRegionId) {
+    return !!team.homeRegionId && user.homeRegionId === team.homeRegionId
+  }
+  return teamIsInPlayerGeo(user, team)
+}
+
 export function rankTeamsByRivalRecord(teams: Team[]): Team[] {
   return [...teams].sort((a, b) => {
     const aw = a.statsWins ?? 0

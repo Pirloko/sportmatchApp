@@ -81,20 +81,17 @@ export async function registerDevicePushToken(
     updated_at: new Date().toISOString(),
   }
 
-  // Intento principal: tabla dedicada mobile_push_subscriptions.
-  const main = await supabase.from('mobile_push_subscriptions').upsert(payload, {
+  const { error } = await supabase.from('mobile_push_subscriptions').upsert(payload, {
     onConflict: 'user_id,token',
   })
-  if (!main.error) return { ok: true, token }
+  if (!error) return { ok: true, token }
 
-  // Fallback: installations (algunos esquemas usan este nombre).
-  const fallback = await supabase.from('push_subscriptions').upsert(payload, {
-    onConflict: 'user_id,token',
-  })
-  if (!fallback.error) return { ok: true, token }
+  const hint = error.message.includes('mobile_push_subscriptions')
+    ? ' Ejecuta scripts/mobile-push-subscriptions-migration.sql en Supabase.'
+    : ''
 
   return {
     ok: false,
-    reason: main.error.message || fallback.error?.message || 'No se pudo guardar token',
+    reason: `${error.message || 'No se pudo guardar token push.'}${hint}`,
   }
 }

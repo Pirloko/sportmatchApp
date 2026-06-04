@@ -64,6 +64,8 @@ export interface User {
   cityId?: string | null
   /** Región de la ciudad del perfil (vía `geo_cities.region_id`). */
   homeRegionId?: string | null
+  /** true si no hay fila en `profiles` y se usó usuario mínimo post-OAuth */
+  missingDbProfile?: boolean
 }
 
 export interface SportsVenue {
@@ -132,6 +134,8 @@ export interface Team {
   logo?: string
   level: Level
   captainId: string
+  /** Segundo capitán (BD: teams.vice_captain_id). */
+  viceCaptainId?: string | null
   members: TeamMember[]
   city: string
   gender: Gender
@@ -253,12 +257,15 @@ export interface Message {
 export interface OnboardingData {
   name: string
   age: number
+  /** ISO `YYYY-MM-DD`; la BD sincroniza `age` vía trigger. */
+  birthDate: string
   gender: Gender
   whatsappPhone: string
   position: Position
   level: Level
   availability: string[]
   city: string
+  cityId: string | null
   photo: string
 }
 

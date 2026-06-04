@@ -29,6 +29,7 @@ const SEGMENT_TO_NAV: Record<string, PlayerNavId> = {
   partidos: 'matches',
   crear: 'create',
   equipos: 'teams',
+  ranking: 'ranking',
   perfil: 'profile',
 };
 
@@ -48,8 +49,12 @@ export default function PlayerTabsLayout() {
     if (id) void persistPlayerLastNav(id);
   }, [segments]);
 
+  if (!currentUser) {
+    return <Redirect href="/" />;
+  }
+
   const mustFinishPlayerOnboarding =
-    currentUser?.accountType === 'player' &&
+    currentUser.accountType === 'player' &&
     (needsOnboarding || onboardingSource === 'profile_edit');
   if (mustFinishPlayerOnboarding) {
     return <Redirect href="/" />;
@@ -83,6 +88,8 @@ export default function PlayerTabsLayout() {
       <Tabs.Screen
         name="explorar"
         options={{
+          // Oculto en tab bar por ahora; la ruta /explorar sigue activa (router.push, etc.)
+          href: null,
           title: 'Explorar',
           headerShown: false,
           tabBarLabel: 'Explorar',
@@ -125,8 +132,23 @@ export default function PlayerTabsLayout() {
         }}
       />
       <Tabs.Screen
+        name="ranking"
+        options={{
+          title: 'Ranking',
+          headerShown: false,
+          tabBarLabel: 'Ranking',
+          tabBarIcon: ({ focused }) =>
+            tabIcon(
+              focused ? 'podium' : 'podium-outline',
+              focused,
+              iconColors
+            ),
+        }}
+      />
+      <Tabs.Screen
         name="perfil"
         options={{
+          href: null,
           title: 'Perfil',
           headerShown: false,
           tabBarLabel: 'Perfil',

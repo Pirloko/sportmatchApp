@@ -1,3 +1,4 @@
+import { useMemo } from 'react'
 import {
   ActivityIndicator,
   Image,
@@ -14,6 +15,7 @@ import {
   matchTypeHomeLabel,
 } from '../lib/format-match'
 import { playersSeekProfileLabel } from '../lib/players-seek-profile'
+import { useScreenTheme } from '../lib/theme-ui'
 import type { MatchOpportunity, MatchType } from '../lib/types'
 
 function isTeamPickType(type: MatchType): boolean {
@@ -33,8 +35,6 @@ type Props = {
   onJoin?: () => void | Promise<void>
   currentUserId?: string
   onShareRevuelta?: () => void
-  /** Tema oscuro (inicio jugador). */
-  dark?: boolean
 }
 
 function actionLabel(type: MatchType, isOwn: boolean, isJoined: boolean): string {
@@ -47,7 +47,7 @@ function actionLabel(type: MatchType, isOwn: boolean, isJoined: boolean): string
 
 function headerStyle(
   t: MatchType,
-  sheet: typeof styles | typeof darkStyles
+  sheet: ReturnType<typeof createCardStyles>
 ) {
   if (t === 'rival') return sheet.headerRival
   if (t === 'players') return sheet.headerPlayers
@@ -57,7 +57,7 @@ function headerStyle(
 
 function headerTextStyle(
   t: MatchType,
-  sheet: typeof styles | typeof darkStyles
+  sheet: ReturnType<typeof createCardStyles>
 ) {
   if (t === 'rival') return sheet.typeTextRival
   if (t === 'players') return sheet.typeTextPlayers
@@ -69,7 +69,7 @@ function btnBg(
   t: MatchType,
   isJoined: boolean,
   isOwn: boolean,
-  sheet: typeof styles | typeof darkStyles
+  sheet: ReturnType<typeof createCardStyles>
 ) {
   if (isJoined && !isOwn) return sheet.btnMuted
   if (t === 'rival') return sheet.btnRival
@@ -87,9 +87,9 @@ export function HomeMatchCard({
   onJoin,
   currentUserId,
   onShareRevuelta,
-  dark = false,
 }: Props) {
-  const s = dark ? darkStyles : styles
+  const theme = useScreenTheme()
+  const s = useMemo(() => createCardStyles(theme), [theme])
   const actionDisabled = joining || (isJoined && !isOwn)
   const label = actionLabel(match.type, isOwn, isJoined)
   const showRevueltaShare =
@@ -204,7 +204,7 @@ export function HomeMatchCard({
               onPress={() => void onJoin?.()}
             >
               {joining ? (
-                <ActivityIndicator color="#fff" size="small" />
+                <ActivityIndicator color={theme.primaryBtnText} size="small" />
               ) : (
                 <Text
                   style={[
@@ -223,219 +223,142 @@ export function HomeMatchCard({
   )
 }
 
-const styles = StyleSheet.create({
-  card: {
-    borderRadius: 16,
-    borderWidth: 1,
-    borderColor: '#e5e7eb',
-    backgroundColor: '#fff',
-    overflow: 'hidden',
-  },
-  cardHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: 14,
-    paddingVertical: 10,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: '#e5e7eb',
-  },
-  headerRival: { backgroundColor: 'rgba(220, 38, 38, 0.08)' },
-  headerPlayers: { backgroundColor: 'rgba(37, 99, 235, 0.08)' },
-  headerOpen: { backgroundColor: 'rgba(8, 145, 178, 0.08)' },
-  headerTeamPick: { backgroundColor: 'rgba(22, 163, 74, 0.1)' },
-  typeBadgeText: { fontSize: 14, fontWeight: '700' },
-  typeTextRival: { color: '#b91c1c' },
-  typeTextPlayers: { color: '#1d4ed8' },
-  typeTextOpen: { color: '#0e7490' },
-  typeTextTeamPick: { color: '#15803d' },
-  levelPill: {
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: '#d1d5db',
-    backgroundColor: '#fff',
-  },
-  levelPillText: { fontSize: 12, fontWeight: '600', color: '#374151' },
-  body: { padding: 14 },
-  title: { fontSize: 17, fontWeight: '700', color: '#111' },
-  muted: { fontSize: 14, color: '#6b7280', marginTop: 4 },
-  desc: { fontSize: 14, color: '#6b7280', marginTop: 6 },
-  metaBlock: { marginTop: 12, gap: 6 },
-  meta: { fontSize: 14, color: '#4b5563' },
-  smallMuted: { fontSize: 12, color: '#6b7280', marginTop: 4 },
-  playersHint: { marginTop: 4 },
-  playersSeek: { fontSize: 12, color: '#374151', marginTop: 4 },
-  progressRow: { marginTop: 4 },
-  progressTrack: {
-    height: 6,
-    backgroundColor: '#e5e7eb',
-    borderRadius: 4,
-    marginTop: 6,
-    overflow: 'hidden',
-  },
-  progressFill: {
-    height: '100%',
-    backgroundColor: '#2563eb',
-    borderRadius: 4,
-  },
-  shareRow: {
-    marginTop: 12,
-    alignSelf: 'flex-start',
-    paddingVertical: 8,
-    paddingHorizontal: 12,
-    borderRadius: 10,
-    borderWidth: 1,
-    borderColor: '#d1d5db',
-  },
-  shareText: { fontSize: 14, fontWeight: '600', color: '#2563eb' },
-  footer: {
-    marginTop: 14,
-    paddingTop: 12,
-    borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: '#e5e7eb',
-  },
-  organizer: { flexDirection: 'row', alignItems: 'center', gap: 10 },
-  avatar: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: '#e5e7eb',
-  },
-  orgName: { fontSize: 14, fontWeight: '600', color: '#111' },
-  orgLabel: { fontSize: 12, color: '#6b7280' },
-  actions: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    marginTop: 12,
-    gap: 10,
-  },
-  link: { fontSize: 14, fontWeight: '600', color: '#2563eb' },
-  actionBtn: {
-    paddingVertical: 10,
-    paddingHorizontal: 16,
-    borderRadius: 10,
-    minWidth: 112,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  actionBtnDisabled: { opacity: 0.5 },
-  btnRival: { backgroundColor: '#dc2626' },
-  btnPlayers: { backgroundColor: '#2563eb' },
-  btnOpen: { backgroundColor: '#0891b2' },
-  btnTeamPick: { backgroundColor: '#16a34a' },
-  btnMuted: { backgroundColor: '#e5e7eb' },
-  actionBtnText: { color: '#fff', fontSize: 14, fontWeight: '700' },
-  actionBtnTextMuted: { color: '#6b7280' },
-})
-
-const darkStyles = StyleSheet.create({
-  card: {
-    borderRadius: 16,
-    borderWidth: 1,
-    borderColor: '#2C3131',
-    backgroundColor: '#141717',
-    overflow: 'hidden',
-  },
-  cardHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: 14,
-    paddingVertical: 10,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: '#2C3131',
-  },
-  headerRival: { backgroundColor: 'rgba(220, 38, 38, 0.15)' },
-  headerPlayers: { backgroundColor: 'rgba(116, 212, 93, 0.12)' },
-  headerOpen: { backgroundColor: 'rgba(251, 146, 60, 0.12)' },
-  headerTeamPick: { backgroundColor: 'rgba(116, 212, 93, 0.14)' },
-  typeBadgeText: { fontSize: 14, fontWeight: '700' },
-  typeTextRival: { color: '#fca5a5' },
-  typeTextPlayers: { color: '#86efac' },
-  typeTextOpen: { color: '#fdba74' },
-  typeTextTeamPick: { color: '#86efac' },
-  levelPill: {
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: '#2C3131',
-    backgroundColor: '#1C2020',
-  },
-  levelPillText: { fontSize: 12, fontWeight: '600', color: '#F5F7F7' },
-  body: { padding: 14 },
-  title: { fontSize: 17, fontWeight: '700', color: '#F5F7F7' },
-  muted: { fontSize: 14, color: '#9CA3A3', marginTop: 4 },
-  desc: { fontSize: 14, color: '#9CA3A3', marginTop: 6 },
-  metaBlock: { marginTop: 12, gap: 6 },
-  meta: { fontSize: 14, color: '#d1d5db' },
-  smallMuted: { fontSize: 12, color: '#9CA3A3', marginTop: 4 },
-  playersHint: { marginTop: 4 },
-  playersSeek: { fontSize: 12, color: '#d1d5db', marginTop: 4 },
-  progressRow: { marginTop: 4 },
-  progressTrack: {
-    height: 6,
-    backgroundColor: '#2C3131',
-    borderRadius: 4,
-    marginTop: 6,
-    overflow: 'hidden',
-  },
-  progressFill: {
-    height: '100%',
-    backgroundColor: '#0F4539',
-    borderRadius: 4,
-  },
-  shareRow: {
-    marginTop: 12,
-    alignSelf: 'flex-start',
-    paddingVertical: 8,
-    paddingHorizontal: 12,
-    borderRadius: 10,
-    borderWidth: 1,
-    borderColor: '#2C3131',
-    backgroundColor: '#1C2020',
-  },
-  shareText: { fontSize: 14, fontWeight: '600', color: '#86efac' },
-  footer: {
-    marginTop: 14,
-    paddingTop: 12,
-    borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: '#2C3131',
-  },
-  organizer: { flexDirection: 'row', alignItems: 'center', gap: 10 },
-  avatar: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: '#2C3131',
-  },
-  orgName: { fontSize: 14, fontWeight: '600', color: '#F5F7F7' },
-  orgLabel: { fontSize: 12, color: '#9CA3A3' },
-  actions: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    marginTop: 12,
-    gap: 10,
-  },
-  link: { fontSize: 14, fontWeight: '600', color: '#86efac' },
-  actionBtn: {
-    paddingVertical: 10,
-    paddingHorizontal: 16,
-    borderRadius: 10,
-    minWidth: 112,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  actionBtnDisabled: { opacity: 0.5 },
-  btnRival: { backgroundColor: '#dc2626' },
-  btnPlayers: { backgroundColor: '#22c55e' },
-  btnOpen: { backgroundColor: '#ea580c' },
-  btnTeamPick: { backgroundColor: '#0F4539' },
-  btnMuted: { backgroundColor: '#2C3131' },
-  actionBtnText: { color: '#fff', fontSize: 14, fontWeight: '700' },
-  actionBtnTextMuted: { color: '#9CA3A3' },
-})
+function createCardStyles(theme: ReturnType<typeof useScreenTheme>) {
+  const { tokens, isDark } = theme
+  return StyleSheet.create({
+    card: {
+      borderRadius: 16,
+      borderWidth: 1,
+      borderColor: theme.border,
+      backgroundColor: theme.card,
+      overflow: 'hidden',
+    },
+    cardHeader: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      paddingHorizontal: 14,
+      paddingVertical: 10,
+      borderBottomWidth: StyleSheet.hairlineWidth,
+      borderBottomColor: theme.border,
+    },
+    headerRival: {
+      backgroundColor: isDark
+        ? 'rgba(239, 68, 68, 0.15)'
+        : 'rgba(220, 38, 38, 0.08)',
+    },
+    headerPlayers: {
+      backgroundColor: isDark
+        ? 'rgba(15, 69, 57, 0.2)'
+        : 'rgba(15, 69, 57, 0.08)',
+    },
+    headerOpen: {
+      backgroundColor: isDark
+        ? 'rgba(245, 158, 11, 0.12)'
+        : 'rgba(217, 123, 53, 0.1)',
+    },
+    headerTeamPick: {
+      backgroundColor: isDark
+        ? 'rgba(34, 197, 94, 0.14)'
+        : 'rgba(22, 163, 74, 0.1)',
+    },
+    typeBadgeText: { fontSize: 14, fontWeight: '700' },
+    typeTextRival: { color: tokens.destructive },
+    typeTextPlayers: { color: isDark ? tokens.success : theme.primary },
+    typeTextOpen: { color: tokens.accent },
+    typeTextTeamPick: { color: tokens.success },
+    levelPill: {
+      paddingHorizontal: 10,
+      paddingVertical: 4,
+      borderRadius: 8,
+      borderWidth: 1,
+      borderColor: theme.border,
+      backgroundColor: isDark ? theme.cardElevated : theme.card,
+    },
+    levelPillText: { fontSize: 12, fontWeight: '600', color: theme.text },
+    body: { padding: 14 },
+    title: { fontSize: 17, fontWeight: '700', color: theme.text },
+    muted: { fontSize: 14, color: theme.textMuted, marginTop: 4 },
+    desc: { fontSize: 14, color: theme.textMuted, marginTop: 6 },
+    metaBlock: { marginTop: 12, gap: 6 },
+    meta: { fontSize: 14, color: theme.textMuted },
+    smallMuted: { fontSize: 12, color: theme.textMuted, marginTop: 4 },
+    playersHint: { marginTop: 4 },
+    playersSeek: { fontSize: 12, color: theme.text, marginTop: 4 },
+    progressRow: { marginTop: 4 },
+    progressTrack: {
+      height: 6,
+      backgroundColor: theme.border,
+      borderRadius: 4,
+      marginTop: 6,
+      overflow: 'hidden',
+    },
+    progressFill: {
+      height: '100%',
+      backgroundColor: isDark ? theme.accent : theme.primary,
+      borderRadius: 4,
+    },
+    shareRow: {
+      marginTop: 12,
+      alignSelf: 'flex-start',
+      paddingVertical: 8,
+      paddingHorizontal: 12,
+      borderRadius: 10,
+      borderWidth: 1,
+      borderColor: theme.border,
+      backgroundColor: isDark ? theme.cardElevated : theme.card,
+    },
+    shareText: {
+      fontSize: 14,
+      fontWeight: '600',
+      color: isDark ? tokens.success : theme.link,
+    },
+    footer: {
+      marginTop: 14,
+      paddingTop: 12,
+      borderTopWidth: StyleSheet.hairlineWidth,
+      borderTopColor: theme.border,
+    },
+    organizer: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+    avatar: {
+      width: 40,
+      height: 40,
+      borderRadius: 20,
+      backgroundColor: theme.border,
+    },
+    orgName: { fontSize: 14, fontWeight: '600', color: theme.text },
+    orgLabel: { fontSize: 12, color: theme.textMuted },
+    actions: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      marginTop: 12,
+      gap: 10,
+    },
+    link: {
+      fontSize: 14,
+      fontWeight: '600',
+      color: isDark ? tokens.success : theme.link,
+    },
+    actionBtn: {
+      paddingVertical: 10,
+      paddingHorizontal: 16,
+      borderRadius: 10,
+      minWidth: 112,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    actionBtnDisabled: { opacity: 0.5 },
+    btnRival: { backgroundColor: tokens.destructive },
+    btnPlayers: { backgroundColor: isDark ? tokens.success : theme.primary },
+    btnOpen: { backgroundColor: tokens.accent },
+    btnTeamPick: { backgroundColor: isDark ? theme.accent : tokens.success },
+    btnMuted: { backgroundColor: theme.border },
+    actionBtnText: {
+      color: theme.primaryBtnText,
+      fontSize: 14,
+      fontWeight: '700',
+    },
+    actionBtnTextMuted: { color: theme.textMuted },
+  })
+}

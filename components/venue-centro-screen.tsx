@@ -17,8 +17,8 @@ import {
   writeCreatePrefill,
 } from '../lib/create-prefill'
 import { useApp } from '../lib/app-provider'
-import { useThemePreference } from '../lib/theme-context'
-import { createClient, isSupabaseConfigured } from '../lib/supabase/client'
+import { useScreenTheme } from '../lib/theme-ui'
+import { getSupabase, isSupabaseConfigured } from '../lib/supabase/client'
 import type { PublicVenuePageData } from '../lib/supabase/venue-public-queries'
 import type { VenueReservationRow } from '../lib/types'
 import { computeDaySlots, WEEKDAY_SHORT_ES } from '../lib/venue-slots'
@@ -46,7 +46,7 @@ const TAB_ROUTES: Array<{ id: PlayerNavId; href: string; label: string }> = [
   { id: 'matches', href: '/partidos', label: 'Partidos' },
   { id: 'create', href: '/crear', label: 'Crear' },
   { id: 'teams', href: '/equipos', label: 'Equipos' },
-  { id: 'profile', href: '/perfil', label: 'Perfil' },
+  { id: 'ranking', href: '/ranking', label: 'Ranking' },
 ]
 
 type Props = {
@@ -56,7 +56,8 @@ type Props = {
 export function VenueCentroScreen({ data }: Props) {
   const { venue, courts, weeklyHours } = data
   const { currentUser } = useApp()
-  const { tokens } = useThemePreference()
+  const theme = useScreenTheme()
+  const styles = useMemo(() => createStyles(theme), [theme])
   const [dayStr, setDayStr] = useState(() => toDateInputValue(new Date()))
   const [reservations, setReservations] = useState<VenueReservationRow[]>([])
   const [loading, setLoading] = useState(false)
@@ -70,7 +71,7 @@ export function VenueCentroScreen({ data }: Props) {
 
   const loadRes = useCallback(async () => {
     if (!isSupabaseConfigured()) return
-    const supabase = createClient()
+    const supabase = getSupabase()
     const start = new Date(day)
     start.setHours(0, 0, 0, 0)
     const end = new Date(day)
@@ -156,7 +157,7 @@ export function VenueCentroScreen({ data }: Props) {
   const telHref = venue.phone?.replace(/\s/g, '') ?? ''
 
   return (
-    <SafeAreaView style={[styles.safe, { backgroundColor: tokens.bgDark }]} edges={['top']}>
+    <SafeAreaView style={styles.safe} edges={['top']}>
       <ScrollView contentContainerStyle={styles.scroll}>
         <Pressable style={styles.back} onPress={() => router.back()}>
           <Text style={styles.backText}>‹ Volver</Text>
@@ -203,6 +204,7 @@ export function VenueCentroScreen({ data }: Props) {
           value={dayStr}
           onChangeText={setDayStr}
           placeholder="2025-03-29"
+          placeholderTextColor={theme.textMuted}
           autoCapitalize="none"
         />
         <Text style={styles.hint}>
@@ -258,7 +260,7 @@ export function VenueCentroScreen({ data }: Props) {
               style={styles.navItem}
               onPress={() => {
                 void persistPlayerLastNav(item.id)
-                router.push(item.href as '/home' | '/explorar' | '/partidos' | '/crear' | '/equipos' | '/perfil')
+                router.push(item.href as '/home' | '/explorar' | '/partidos' | '/crear' | '/equipos' | '/ranking')
               }}
             >
               <Text
@@ -276,85 +278,90 @@ export function VenueCentroScreen({ data }: Props) {
 }
 
 export function VenueCentroLoading() {
+  const theme = useScreenTheme()
+  const styles = useMemo(() => createStyles(theme), [theme])
   return (
     <View style={styles.center}>
-      <ActivityIndicator size="large" />
+      <ActivityIndicator size="large" color={theme.primary} />
     </View>
   )
 }
 
-const styles = StyleSheet.create({
-  safe: { flex: 1, backgroundColor: '#fff' },
-  scroll: { padding: 16, paddingBottom: 100 },
-  back: { marginBottom: 8 },
-  backText: { fontSize: 16, color: '#2563eb', fontWeight: '600' },
-  h1: { fontSize: 24, fontWeight: '800', color: '#111' },
-  sub: { fontSize: 15, color: '#6b7280', marginTop: 4 },
-  card: {
-    marginTop: 16,
-    padding: 14,
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: '#e5e7eb',
-    backgroundColor: '#fafafa',
-    gap: 8,
-  },
-  line: { fontSize: 15, color: '#374151' },
-  link: { color: '#2563eb', fontWeight: '600', fontSize: 15 },
-  infoBox: {
-    marginTop: 20,
-    padding: 14,
-    borderRadius: 12,
-    backgroundColor: '#f3f4f6',
-    gap: 8,
-  },
-  infoTitle: { fontSize: 15, fontWeight: '700', color: '#111' },
-  infoBody: { fontSize: 14, color: '#4b5563', lineHeight: 20 },
-  sectionTitle: {
-    fontSize: 18,
-    fontWeight: '700',
-    color: '#111',
-    marginTop: 20,
-    marginBottom: 8,
-  },
-  label: { fontSize: 13, color: '#6b7280', marginBottom: 4 },
-  dateInput: {
-    borderWidth: 1,
-    borderColor: '#e5e7eb',
-    borderRadius: 10,
-    padding: 12,
-    fontSize: 16,
-    backgroundColor: '#fff',
-  },
-  hint: { fontSize: 12, color: '#6b7280', marginTop: 8, marginBottom: 12 },
-  muted: { fontSize: 14, color: '#6b7280' },
-  slotCard: {
-    borderWidth: 1,
-    borderColor: '#e5e7eb',
-    borderRadius: 12,
-    padding: 12,
-    marginBottom: 10,
-    backgroundColor: '#fff',
-  },
-  slotRow: { gap: 4, marginBottom: 8 },
-  slotTime: { fontSize: 16, fontWeight: '700', color: '#111' },
-  cta: {
-    backgroundColor: '#2563eb',
-    borderRadius: 10,
-    paddingVertical: 12,
-    alignItems: 'center',
-  },
-  ctaText: { color: '#fff', fontWeight: '700', fontSize: 15 },
-  bottomNav: {
-    flexDirection: 'row',
-    borderTopWidth: StyleSheet.hairlineWidth,
-    borderColor: '#e5e7eb',
-    paddingBottom: 8,
-    paddingTop: 6,
-    backgroundColor: '#fff',
-  },
-  navItem: { flex: 1, alignItems: 'center', paddingVertical: 6 },
-  navLabel: { fontSize: 9, color: '#6b7280', fontWeight: '600' },
-  navLabelActive: { color: '#2563eb' },
-  center: { flex: 1, justifyContent: 'center', alignItems: 'center' },
-})
+function createStyles(theme: ReturnType<typeof useScreenTheme>) {
+  return StyleSheet.create({
+    safe: { flex: 1, backgroundColor: theme.bg },
+    scroll: { padding: 16, paddingBottom: 100 },
+    back: { marginBottom: 8 },
+    backText: { fontSize: 16, color: theme.link, fontWeight: '600' },
+    h1: { fontSize: 24, fontWeight: '800', color: theme.text },
+    sub: { fontSize: 15, color: theme.textMuted, marginTop: 4 },
+    card: {
+      marginTop: 16,
+      padding: 14,
+      borderRadius: 12,
+      borderWidth: 1,
+      borderColor: theme.border,
+      backgroundColor: theme.card,
+      gap: 8,
+    },
+    line: { fontSize: 15, color: theme.text },
+    link: { color: theme.link, fontWeight: '600', fontSize: 15 },
+    infoBox: {
+      marginTop: 20,
+      padding: 14,
+      borderRadius: 12,
+      backgroundColor: theme.chipBg,
+      gap: 8,
+    },
+    infoTitle: { fontSize: 15, fontWeight: '700', color: theme.text },
+    infoBody: { fontSize: 14, color: theme.textMuted, lineHeight: 20 },
+    sectionTitle: {
+      fontSize: 18,
+      fontWeight: '700',
+      color: theme.text,
+      marginTop: 20,
+      marginBottom: 8,
+    },
+    label: { fontSize: 13, color: theme.textMuted, marginBottom: 4 },
+    dateInput: {
+      borderWidth: 1,
+      borderColor: theme.inputBorder,
+      borderRadius: 10,
+      padding: 12,
+      fontSize: 16,
+      backgroundColor: theme.inputBg,
+      color: theme.text,
+    },
+    hint: { fontSize: 12, color: theme.textMuted, marginTop: 8, marginBottom: 12 },
+    muted: { fontSize: 14, color: theme.textMuted },
+    slotCard: {
+      borderWidth: 1,
+      borderColor: theme.border,
+      borderRadius: 12,
+      padding: 12,
+      marginBottom: 10,
+      backgroundColor: theme.card,
+    },
+    slotRow: { gap: 4, marginBottom: 8 },
+    slotTime: { fontSize: 16, fontWeight: '700', color: theme.text },
+    cta: {
+      backgroundColor: theme.primary,
+      borderRadius: 10,
+      paddingVertical: 12,
+      alignItems: 'center',
+    },
+    ctaText: { color: theme.primaryBtnText, fontWeight: '700', fontSize: 15 },
+    bottomNav: {
+      flexDirection: 'row',
+      borderTopWidth: StyleSheet.hairlineWidth,
+      borderColor: theme.border,
+      paddingBottom: 8,
+      paddingTop: 6,
+      backgroundColor: theme.card,
+    },
+    navItem: { flex: 1, alignItems: 'center', paddingVertical: 6 },
+    navLabel: { fontSize: 9, color: theme.textMuted, fontWeight: '600' },
+    navLabelActive: { color: theme.primary },
+    center: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: theme.bg },
+  })
+}

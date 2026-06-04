@@ -9,7 +9,7 @@ import {
 } from 'react-native'
 
 import { playersJoinRules } from '../lib/players-seek-profile'
-import { useThemePreference } from '../lib/theme-context'
+import { useScreenTheme } from '../lib/theme-ui'
 import type { MatchOpportunity } from '../lib/types'
 import { useMatchParticipantCounts } from '../lib/use-match-participant-counts'
 
@@ -26,7 +26,8 @@ export function JoinPlayersModal({
   opportunity,
   onJoin,
 }: Props) {
-  const { resolved } = useThemePreference()
+  const theme = useScreenTheme()
+  const styles = useMemo(() => createModalStyles(theme), [theme])
   const [submitting, setSubmitting] = useState(false)
   const { gkCount, fieldCount, joinedCount, loading } = useMatchParticipantCounts(
     opportunity?.id,
@@ -79,7 +80,6 @@ export function JoinPlayersModal({
         return left === 1 ? 'Se busca 1 jugador.' : `Se buscan ${left} jugadores.`
     }
   }, [loading, needed, full, left, rules.kind, gkCount, fieldCount])
-  const dark = resolved === 'dark'
 
   const handleJoin = async (asGk: boolean) => {
     if (full) return
@@ -95,36 +95,36 @@ export function JoinPlayersModal({
   return (
     <Modal visible={visible} transparent animationType="slide">
       <View style={styles.wrap}>
-        <Pressable style={[styles.fill, dark && styles.fillDark]} onPress={onClose} />
-        <View style={[styles.sheet, dark && styles.sheetDark]}>
-          <Text style={[styles.title, dark && styles.titleDark]}>
-            Postular a la búsqueda
-          </Text>
-          <Text style={[styles.sub, dark && styles.subDark]}>
+        <Pressable style={styles.fill} onPress={onClose} />
+        <View style={styles.sheet}>
+          <Text style={styles.title}>Postular a la búsqueda</Text>
+          <Text style={styles.sub}>
             {opportunity.title} — elige cómo te sumas según lo que busca el
             organizador.
           </Text>
-          <View style={[styles.info, dark && styles.infoDark]}>
-            <Text style={[styles.summaryTitle, dark && styles.summaryTitleDark]}>
-              {summaryTitle}
-            </Text>
-            <Text style={[styles.summaryDetail, dark && styles.summaryDetailDark]}>
-              {summaryDetail}
-            </Text>
+          <View style={styles.info}>
+            <Text style={styles.summaryTitle}>{summaryTitle}</Text>
+            <Text style={styles.summaryDetail}>{summaryDetail}</Text>
             {needed > 0 && !loading ? (
-              <Text style={[styles.cupos, dark && styles.cuposDark]}>
-                Cupos: <Text style={[styles.bold, dark && styles.boldDark]}>{joined}</Text>/
-                <Text style={[styles.bold, dark && styles.boldDark]}>{needed}</Text>
+              <Text style={styles.cupos}>
+                Cupos: <Text style={styles.bold}>{joined}</Text>/
+                <Text style={styles.bold}>{needed}</Text>
               </Text>
             ) : null}
           </View>
           {submitting ? (
-            <ActivityIndicator style={{ marginVertical: 12 }} />
+            <ActivityIndicator
+              style={{ marginVertical: 12 }}
+              color={theme.primary}
+            />
           ) : (
             <>
               {rules.kind === 'legacy' && (
                 <Pressable
-                  style={[styles.btnPrimary, (full || loading) && styles.btnDisabled]}
+                  style={[
+                    styles.btnPrimary,
+                    (full || loading) && styles.btnDisabled,
+                  ]}
                   disabled={submitting || full || loading}
                   onPress={() => void handleJoin(false)}
                 >
@@ -172,22 +172,19 @@ export function JoinPlayersModal({
                   <Pressable
                     style={[
                       styles.btnSecondary,
-                      dark && styles.btnSecondaryDark,
                       (full || loading || !gkSlotMixed) && styles.btnDisabled,
                     ]}
                     disabled={submitting || full || loading || !gkSlotMixed}
                     onPress={() => void handleJoin(true)}
                   >
-                    <Text style={[styles.btnSecondaryText, dark && styles.btnSecondaryTextDark]}>
+                    <Text style={styles.btnSecondaryText}>
                       Arquero (máx. 1) 🧤
                     </Text>
                   </Pressable>
                 </>
               )}
               <Pressable style={styles.btnGhost} onPress={onClose}>
-                <Text style={[styles.btnGhostText, dark && styles.btnGhostTextDark]}>
-                  Cancelar
-                </Text>
+                <Text style={styles.btnGhostText}>Cancelar</Text>
               </Pressable>
             </>
           )}
@@ -197,67 +194,59 @@ export function JoinPlayersModal({
   )
 }
 
-const styles = StyleSheet.create({
-  wrap: {
-    flex: 1,
-    justifyContent: 'flex-end',
-  },
-  fill: {
-    ...StyleSheet.absoluteFillObject,
-    backgroundColor: 'rgba(0,0,0,0.5)',
-  },
-  fillDark: { backgroundColor: 'rgba(2,6,23,0.72)' },
-  sheet: {
-    backgroundColor: '#fff',
-    borderTopLeftRadius: 16,
-    borderTopRightRadius: 16,
-    padding: 20,
-    paddingBottom: 28,
-  },
-  sheetDark: {
-    backgroundColor: '#111827',
-    borderTopWidth: 1,
-    borderTopColor: 'rgba(116, 212, 93, 0.28)',
-  },
-  title: { fontSize: 18, fontWeight: '700', color: '#111' },
-  titleDark: { color: '#f9fafb' },
-  sub: { fontSize: 14, color: '#6b7280', marginTop: 6, marginBottom: 14 },
-  subDark: { color: '#9ca3af' },
-  info: {
-    backgroundColor: '#f3f4f6',
-    borderRadius: 12,
-    padding: 12,
-    marginBottom: 16,
-  },
-  infoDark: { backgroundColor: '#1f2937' },
-  summaryTitle: { fontSize: 16, fontWeight: '700', color: '#111' },
-  summaryTitleDark: { color: '#f9fafb' },
-  summaryDetail: { fontSize: 14, color: '#6b7280', marginTop: 4 },
-  summaryDetailDark: { color: '#d1d5db' },
-  cupos: { fontSize: 12, color: '#6b7280', marginTop: 8 },
-  cuposDark: { color: '#9ca3af' },
-  bold: { fontWeight: '700', color: '#111' },
-  boldDark: { color: '#f9fafb' },
-  btnPrimary: {
-    backgroundColor: '#2563eb',
-    paddingVertical: 14,
-    borderRadius: 12,
-    alignItems: 'center',
-    marginBottom: 10,
-  },
-  btnPrimaryText: { color: '#fff', fontSize: 16, fontWeight: '700' },
-  btnSecondary: {
-    backgroundColor: '#e5e7eb',
-    paddingVertical: 14,
-    borderRadius: 12,
-    alignItems: 'center',
-    marginBottom: 10,
-  },
-  btnSecondaryDark: { backgroundColor: '#374151' },
-  btnSecondaryText: { color: '#111', fontSize: 16, fontWeight: '600' },
-  btnSecondaryTextDark: { color: '#f3f4f6' },
-  btnGhost: { paddingVertical: 12, alignItems: 'center' },
-  btnGhostText: { color: '#6b7280', fontSize: 16 },
-  btnGhostTextDark: { color: '#9ca3af' },
-  btnDisabled: { opacity: 0.45 },
-})
+function createModalStyles(theme: ReturnType<typeof useScreenTheme>) {
+  return StyleSheet.create({
+    wrap: {
+      flex: 1,
+      justifyContent: 'flex-end',
+    },
+    fill: {
+      ...StyleSheet.absoluteFillObject,
+      backgroundColor: theme.overlay,
+    },
+    sheet: {
+      borderTopLeftRadius: 16,
+      borderTopRightRadius: 16,
+      padding: 20,
+      paddingBottom: 28,
+      backgroundColor: theme.card,
+      borderTopColor: theme.modalSheetTopBorder,
+      borderTopWidth: theme.isDark ? 1 : 0,
+    },
+    title: { fontSize: 18, fontWeight: '700', color: theme.text },
+    sub: { fontSize: 14, marginTop: 6, marginBottom: 14, color: theme.textMuted },
+    info: {
+      borderRadius: 12,
+      padding: 12,
+      marginBottom: 16,
+      backgroundColor: theme.chipBg,
+    },
+    summaryTitle: { fontSize: 16, fontWeight: '700', color: theme.text },
+    summaryDetail: { fontSize: 14, marginTop: 4, color: theme.textMuted },
+    cupos: { fontSize: 12, marginTop: 8, color: theme.textMuted },
+    bold: { fontWeight: '700', color: theme.text },
+    btnPrimary: {
+      paddingVertical: 14,
+      borderRadius: 12,
+      alignItems: 'center',
+      marginBottom: 10,
+      backgroundColor: theme.primary,
+    },
+    btnPrimaryText: {
+      fontSize: 16,
+      fontWeight: '700',
+      color: theme.primaryBtnText,
+    },
+    btnSecondary: {
+      paddingVertical: 14,
+      borderRadius: 12,
+      alignItems: 'center',
+      marginBottom: 10,
+      backgroundColor: theme.chipBg,
+    },
+    btnSecondaryText: { fontSize: 16, fontWeight: '600', color: theme.text },
+    btnGhost: { paddingVertical: 12, alignItems: 'center' },
+    btnGhostText: { fontSize: 16, color: theme.textMuted },
+    btnDisabled: { opacity: 0.45 },
+  })
+}

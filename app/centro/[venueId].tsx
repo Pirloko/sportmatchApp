@@ -6,7 +6,7 @@ import {
   VenueCentroLoading,
   VenueCentroScreen,
 } from '../../components/venue-centro-screen'
-import { createClient, isSupabaseConfigured } from '../../lib/supabase/client'
+import { getSupabase, isSupabaseConfigured } from '../../lib/supabase/client'
 import {
   fetchPublicVenuePageData,
   type PublicVenuePageData,
@@ -30,7 +30,7 @@ export default function CentroPublicRoute() {
     }
     let cancelled = false
     void (async () => {
-      const d = await fetchPublicVenuePageData(createClient(), venueId)
+      const d = await fetchPublicVenuePageData(getSupabase(), venueId)
       if (!cancelled) setData(d ?? null)
     })()
     return () => {

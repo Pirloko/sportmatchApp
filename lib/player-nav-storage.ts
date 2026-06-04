@@ -8,6 +8,7 @@ export type PlayerNavId =
   | 'matches'
   | 'create'
   | 'teams'
+  | 'ranking'
   | 'profile'
 
 const IDS = new Set<PlayerNavId>([
@@ -16,6 +17,7 @@ const IDS = new Set<PlayerNavId>([
   'matches',
   'create',
   'teams',
+  'ranking',
   'profile',
 ])
 
