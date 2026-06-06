@@ -1,6 +1,6 @@
 import { Ionicons } from '@expo/vector-icons'
 import { router, useLocalSearchParams } from 'expo-router'
-import { useCallback, useEffect, useMemo, useState, type ComponentProps } from 'react'
+import { useCallback, useEffect, useMemo, useState, Fragment, type ComponentProps } from 'react'
 import {
   ActivityIndicator,
   Alert,
@@ -37,6 +37,7 @@ import {
 } from '../lib/supabase/rating-queries'
 import { MatchCompletionPanel } from './match-completion-panel'
 import { MatchPitchLineup } from './match-pitch-lineup'
+import { PublicPlayerProfileModal } from './public-player-profile-modal'
 import { RivalMatchEncounter } from './rival-match-encounter'
 import {
   fetchRivalEncounterDetail,
@@ -155,6 +156,7 @@ export function MatchDetailScreen() {
     Map<string, 'home' | 'away'>
   >(new Map())
   const [loadingRivalMeta, setLoadingRivalMeta] = useState(false)
+  const [profileUserId, setProfileUserId] = useState<string | null>(null)
   const { resolved, tokens } = useThemePreference()
   const isDark = resolved === 'dark'
 
@@ -501,13 +503,10 @@ export function MatchDetailScreen() {
     }
   }
 
-  if (
-    !currentUser ||
-    (currentUser.accountType !== 'player' && currentUser.accountType !== 'admin')
-  ) {
+  if (!currentUser || currentUser.accountType !== 'player') {
     return (
       <View style={[styles.center, { backgroundColor: tokens.bgDark }]}>
-        <Text style={[styles.mutedLeft, { color: tokens.textMuted }]}>Solo jugadores y admin.</Text>
+        <Text style={[styles.mutedLeft, { color: tokens.textMuted }]}>Solo jugadores.</Text>
       </View>
     )
   }
@@ -543,7 +542,12 @@ export function MatchDetailScreen() {
     neededCount > 0 ? Math.min(100, Math.round((joinedCount / neededCount) * 100)) : 0
   const statusColors = statusTone(opp.status, tokens)
 
+  const openPlayerProfile = useCallback((userId: string) => {
+    setProfileUserId(userId)
+  }, [])
+
   return (
+    <Fragment>
     <ScrollView
       style={[styles.scroll, { backgroundColor: tokens.bgDark }]}
       contentContainerStyle={styles.content}
@@ -732,17 +736,18 @@ export function MatchDetailScreen() {
               accentGold={tokens.accentGold}
               rivalJoinTeam={userRivalPickTeam}
               onRivalSlotPress={(pick) => void onRivalSlotPress(pick)}
+              onPlayerPress={openPlayerProfile}
             />
             <View style={[styles.tipBox, { backgroundColor: isDark ? 'rgba(255,255,255,0.05)' : '#F0F5EF', marginTop: 10 }]}>
               <Ionicons name="finger-print-outline" size={16} color={tokens.accentGold} />
               <Text style={[styles.lineupJoinHint, { color: tokens.textMuted }]}>
                 {canRivalPickSlot
                   ? isParticipant
-                    ? 'Toca otro círculo libre de tu equipo para cambiar de cupo (cancha o suplente).'
+                    ? 'Toca otro círculo libre de tu equipo para cambiar de cupo (cancha o suplente). Toca un jugador para ver su perfil.'
                     : 'Toca un círculo libre de tu equipo (arriba o abajo) para anotarte en ese cupo.'
                   : userRivalPickTeam
-                    ? 'Tu equipo ya no tiene cupos libres en este encuentro.'
-                    : 'Puedes ver la plantilla. Solo miembros de los equipos del desafío pueden ocupar cupos.'}
+                    ? 'Tu equipo ya no tiene cupos libres en este encuentro. Toca un jugador para ver su perfil.'
+                    : 'Toca un jugador en la cancha para ver su perfil. Solo miembros de los equipos del desafío pueden ocupar cupos.'}
               </Text>
             </View>
           </>
@@ -767,21 +772,33 @@ export function MatchDetailScreen() {
                   setTeamPickRole(slotRoleToTeamPickRole(role))
                 }
               }}
+              onPlayerPress={openPlayerProfile}
             />
             {canJoin ? (
               <View style={[styles.tipBox, { backgroundColor: isDark ? 'rgba(255,255,255,0.05)' : '#F0F5EF' }]}>
                 <Ionicons name="finger-print-outline" size={16} color={tokens.accentGold} />
                 <Text style={[styles.lineupJoinHint, { color: tokens.textMuted }]}>
-                  Toca un cupo libre en la cancha y confirma tu rol abajo.
+                  Toca un cupo libre en la cancha y confirma tu rol abajo. Toca un jugador para ver su perfil.
                 </Text>
               </View>
-            ) : null}
+            ) : (
+              <View style={[styles.tipBox, { backgroundColor: isDark ? 'rgba(255,255,255,0.05)' : '#F0F5EF' }]}>
+                <Ionicons name="information-circle-outline" size={16} color={tokens.textMuted} />
+                <Text style={[styles.lineupJoinHint, { color: tokens.textMuted }]}>
+                  Toca un jugador en la cancha para ver su perfil.
+                </Text>
+              </View>
+            )}
           </>
         ) : isRivalMatch ? null : loadingParticipants ? (
           <ActivityIndicator color={tokens.primaryGreen} style={{ marginVertical: 16 }} />
         ) : participants.length > 0 ? (
           participants.map((p) => (
-            <View key={p.id} style={[styles.partRow, { borderBottomColor: tokens.borderDark }]}>
+            <Pressable
+              key={p.id}
+              style={[styles.partRow, { borderBottomColor: tokens.borderDark }]}
+              onPress={() => openPlayerProfile(p.id)}
+            >
               <Image source={{ uri: p.photo }} style={styles.partAvatar} />
               <Text style={[styles.partName, { color: tokens.textPrimary }]} numberOfLines={1}>
                 {p.name}
@@ -790,7 +807,7 @@ export function MatchDetailScreen() {
               <Text style={[styles.partBadge, { color: tokens.textMuted }]}>
                 {p.status === 'creator' ? 'Org.' : p.status === 'confirmed' ? 'OK' : p.status}
               </Text>
-            </View>
+            </Pressable>
           ))
         ) : (
           <Text style={[styles.mutedLeft, { color: tokens.textMuted }]}>Sin participantes aún.</Text>
@@ -979,6 +996,15 @@ export function MatchDetailScreen() {
         submitMatchRating={submitMatchRating}
       />
     </ScrollView>
+    <PublicPlayerProfileModal
+      visible={profileUserId != null}
+      userId={profileUserId}
+      currentUserId={currentUser.id}
+      contextType="match"
+      contextId={opp.id}
+      onClose={() => setProfileUserId(null)}
+    />
+    </Fragment>
   )
 }
 

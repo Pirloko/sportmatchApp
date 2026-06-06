@@ -3,6 +3,7 @@ import { lazy, Suspense } from 'react'
 import { ActivityIndicator, StyleSheet, View } from 'react-native'
 
 import { useApp } from '../lib/app-provider'
+import { isPlayerOnlyMobilePlatform } from '../lib/mobile-app-access'
 
 const VenueDashboardScreen = lazy(() =>
   import('../components/venue-dashboard-screen').then((m) => ({
@@ -12,6 +13,10 @@ const VenueDashboardScreen = lazy(() =>
 
 export default function MiCentroRoute() {
   const { currentUser, authLoading } = useApp()
+
+  if (isPlayerOnlyMobilePlatform()) {
+    return <Redirect href="/" />
+  }
 
   if (authLoading) {
     return (

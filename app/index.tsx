@@ -1,10 +1,15 @@
 import { Redirect } from 'expo-router';
-import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-native';
+import { Pressable, StyleSheet, Text, View } from 'react-native';
 
+import { AuthProfileLoadingScreen } from '../components/auth-profile-loading-screen';
 import { AuthScreen } from '../components/auth-screen';
+import { MobileAccessRestrictedScreen } from '../components/mobile-access-restricted-screen';
 import { OnboardingScreen } from '../components/onboarding-screen';
-import { VenueOnboardingScreen } from '../components/venue-onboarding-screen';
 import { PlayerEntryRedirect } from '../components/player-entry-redirect';
+import {
+  isMobilePlayerAccount,
+  isPlayerOnlyMobilePlatform,
+} from '../lib/mobile-app-access';
 import { isSupabaseConfigured } from '../lib/supabase/client';
 import { useApp } from '../lib/app-provider';
 
@@ -15,19 +20,13 @@ export default function RootGateScreen() {
     currentUser,
     logout,
     needsOnboarding,
-    needsVenueOnboarding,
     onboardingSource,
   } = useApp();
 
   const supabaseOk = isSupabaseConfigured();
 
   if (authLoading) {
-    return (
-      <View style={styles.centered}>
-        <ActivityIndicator size="large" />
-        <Text style={styles.loadingText}>Cargando sesión…</Text>
-      </View>
-    );
+    return <AuthProfileLoadingScreen message="Cargando sesión…" />;
   }
 
   if (!supabaseOk) {
@@ -50,11 +49,16 @@ export default function RootGateScreen() {
     );
   }
 
-  if (needsVenueOnboarding) {
+  if (
+    isPlayerOnlyMobilePlatform() &&
+    currentUser &&
+    !isMobilePlayerAccount(currentUser.accountType)
+  ) {
     return (
-      <View style={styles.flexFill}>
-        <VenueOnboardingScreen />
-      </View>
+      <MobileAccessRestrictedScreen
+        accountType={currentUser.accountType}
+        onLogout={() => void logout()}
+      />
     );
   }
 
@@ -103,26 +107,10 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: '#020303',
   },
-  centered: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    backgroundColor: '#fff',
-  },
-  loadingText: {
-    marginTop: 12,
-    fontSize: 15,
-    opacity: 0.7,
-  },
   title: {
     fontSize: 22,
     fontWeight: '700',
     marginBottom: 12,
-  },
-  note: {
-    fontSize: 15,
-    opacity: 0.75,
-    marginBottom: 8,
   },
   outBtn: {
     marginTop: 16,

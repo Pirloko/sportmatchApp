@@ -132,6 +132,7 @@ type Props = {
   /** Bando del usuario en partido rival (solo puede tocar cupos de su equipo). */
   rivalJoinTeam?: RivalPickTeam | null
   onRivalSlotPress?: (pick: RivalSlotPick) => void
+  onPlayerPress?: (userId: string) => void
 }
 
 export function MatchPitchLineup({
@@ -145,6 +146,7 @@ export function MatchPitchLineup({
   onEmptySlotPress,
   rivalJoinTeam = null,
   onRivalSlotPress,
+  onPlayerPress,
 }: Props) {
   const theme = useMemo(
     () => themeForMode(isDark, accentGold),
@@ -235,6 +237,7 @@ export function MatchPitchLineup({
                   ? () => onEmptySlotPress('A', slot.role)
                   : undefined
             }
+            onPlayerPress={onPlayerPress}
           />
         )
       })}
@@ -271,6 +274,7 @@ export function MatchPitchLineup({
                     ? () => onEmptySlotPress('B', slot.role)
                     : undefined
               }
+              onPlayerPress={onPlayerPress}
             />
           )
         })}
@@ -302,6 +306,7 @@ export function MatchPitchLineup({
           rivalJoinTeam={rivalJoinTeam}
           currentUserId={currentUserId}
           onRivalSlotPress={onRivalSlotPress}
+          onPlayerPress={onPlayerPress}
         />
       ) : null}
 
@@ -316,6 +321,7 @@ export function MatchPitchLineup({
           rivalJoinTeam={rivalJoinTeam}
           currentUserId={currentUserId}
           onRivalSlotPress={onRivalSlotPress}
+          onPlayerPress={onPlayerPress}
         />
       ) : null}
 
@@ -525,6 +531,7 @@ function PitchPlayerToken({
   canJoin,
   isYou,
   onPressEmpty,
+  onPlayerPress,
 }: {
   slot: LineupSlot
   xPct: number
@@ -536,6 +543,7 @@ function PitchPlayerToken({
   canJoin: boolean
   isYou: boolean
   onPressEmpty?: () => void
+  onPlayerPress?: (userId: string) => void
 }) {
   const player = slot.player
   const role = player ? lineupRoleLabel(player) : slotRoleLabel(slot.role)
@@ -623,6 +631,18 @@ function PitchPlayerToken({
     )
   }
 
+  if (player && onPlayerPress) {
+    return (
+      <Pressable
+        onPress={() => onPlayerPress(player.id)}
+        style={({ pressed }) => [posStyle, pressed ? { opacity: 0.88 } : null]}
+        accessibilityLabel={`Ver perfil de ${player.name}`}
+      >
+        {body}
+      </Pressable>
+    )
+  }
+
   return <View style={posStyle}>{body}</View>
 }
 
@@ -634,6 +654,7 @@ function RivalBenchRow({
   rivalJoinTeam,
   currentUserId,
   onRivalSlotPress,
+  onPlayerPress,
 }: {
   bench: RivalBenchSlot[]
   pickTeam: RivalPickTeam
@@ -642,6 +663,7 @@ function RivalBenchRow({
   rivalJoinTeam: RivalPickTeam | null
   currentUserId?: string
   onRivalSlotPress?: (pick: RivalSlotPick) => void
+  onPlayerPress?: (userId: string) => void
 }) {
   const tokenSize = 40
   return (
@@ -716,6 +738,18 @@ function RivalBenchRow({
                 style={styles.benchSlot}
                 onPress={() => onRivalSlotPress(pick)}
                 accessibilityLabel={`Unirme cupo ${b.lineupSlot}`}
+              >
+                {body}
+              </Pressable>
+            )
+          }
+          if (b.player && onPlayerPress) {
+            return (
+              <Pressable
+                key={b.lineupSlot}
+                style={styles.benchSlot}
+                onPress={() => onPlayerPress(b.player!.id)}
+                accessibilityLabel={`Ver perfil de ${b.player!.name}`}
               >
                 {body}
               </Pressable>

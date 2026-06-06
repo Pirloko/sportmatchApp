@@ -10,6 +10,7 @@ import { TelemetryBootstrap } from '../lib/telemetry/bootstrap';
 import { ThemeProvider, useThemePreference } from '../lib/theme-context';
 import { buildScreenTheme, navigationThemeOptions } from '../lib/theme-ui';
 import { AppQueryProvider } from '../src/app/providers/query-provider';
+import { ProfileHydratingOverlay } from '../components/profile-hydrating-overlay';
 
 function RootLayout() {
   return (
@@ -58,6 +59,7 @@ function RootLayoutWithTheme() {
           />
           <Stack.Screen name="terms" options={{ title: 'Términos de Uso' }} />
         </Stack>
+        <ProfileHydratingOverlay />
       </AppProvider>
     </AppQueryProvider>
   );

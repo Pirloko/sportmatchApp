@@ -5,6 +5,10 @@ import type { ComponentProps } from 'react';
 
 import { persistPlayerLastNav, type PlayerNavId } from '../../lib/player-nav-storage';
 import { useApp } from '../../lib/app-provider';
+import {
+  isMobilePlayerAccount,
+  isPlayerOnlyMobilePlatform,
+} from '../../lib/mobile-app-access';
 import { useThemePreference } from '../../lib/theme-context';
 
 type IconName = ComponentProps<typeof Ionicons>['name'];
@@ -50,6 +54,13 @@ export default function PlayerTabsLayout() {
   }, [segments]);
 
   if (!currentUser) {
+    return <Redirect href="/" />;
+  }
+
+  if (
+    isPlayerOnlyMobilePlatform() &&
+    !isMobilePlayerAccount(currentUser.accountType)
+  ) {
     return <Redirect href="/" />;
   }
 

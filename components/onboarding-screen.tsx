@@ -480,9 +480,9 @@ export function OnboardingScreen() {
       >
         <View style={styles.heroCard}>
           <Image
-            source={require('../assets/logohome.webp')}
+            source={require('../assets/sportmatch-logo.png')}
             style={styles.heroImage}
-            contentFit="cover"
+            contentFit="contain"
           />
           <View style={styles.heroOverlay} />
           <View style={styles.heroTextWrap}>
@@ -814,6 +814,7 @@ function createStyles(theme: ReturnType<typeof useScreenTheme>) {
       overflow: 'hidden',
       height: 140,
       marginBottom: 12,
+      backgroundColor: '#000',
     },
     heroImage: { ...StyleSheet.absoluteFillObject },
     heroOverlay: {

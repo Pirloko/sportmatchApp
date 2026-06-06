@@ -13,10 +13,11 @@ import {
   useContext,
   useEffect,
   useMemo,
+  useRef,
   useState,
   type ReactNode,
 } from 'react'
-import { Platform } from 'react-native'
+import { Alert, Platform } from 'react-native'
 import type {
   Gender,
   Level,
@@ -42,6 +43,13 @@ import {
 import { startGlobalOAuthCallbackCapture } from './auth/oauth-callback-handler'
 import { inspectAuthorizeUrl, logPkceRuntimeState } from './auth/pkce-inspect'
 import { completeOAuthFromRedirectUrl } from './complete-oauth-redirect'
+import {
+  isMobilePlayerAccount,
+  isPlayerOnlyMobilePlatform,
+  MOBILE_ACCESS_ALERT_TITLE,
+  mobileAccessDeniedDetail,
+  mobileAccessDeniedMessage,
+} from './mobile-app-access'
 import { getOAuthRedirectUri } from './oauth-redirect'
 import {
   DEFAULT_AVATAR,
@@ -127,6 +135,12 @@ function needsOnboardingProfile(u: User): boolean {
   return u.name.trim().length < 2 || u.age < 17
 }
 
+function googleOAuthQueryParams(isSignUp: boolean): Record<string, string> {
+  return {
+    prompt: isSignUp ? 'select_account consent' : 'select_account',
+  }
+}
+
 function isTeamPickMatchType(type: MatchType): boolean {
   return (
     type === 'team_pick' ||
@@ -146,6 +160,9 @@ export type LoginResult = {
 
 type AppContextType = {
   authLoading: boolean
+  /** Carga de perfil tras OAuth o sesión (evita flash de onboarding). */
+  profileHydrating: boolean
+  profileLoadingMessage: string
   currentUser: User | null
   isAuthenticated: boolean
   /** Re-hidrata currentUser desde la sesión Supabase (p. ej. tras OAuth en /auth/callback). */
@@ -363,6 +380,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const supabase = useMemo<SupabaseClient | null>(() => getSupabaseOrNull(), [])
 
   const [authLoading, setAuthLoading] = useState(true)
+  const [profileHydrating, setProfileHydrating] = useState(false)
+  const [profileLoadingMessage, setProfileLoadingMessage] = useState(
+    'Preparando tu cancha…'
+  )
+  const profileHydrateOpsRef = useRef(0)
   const [currentUser, setCurrentUser] = useState<User | null>(null)
   const [matchOpportunities, setMatchOpportunities] = useState<
     MatchOpportunity[]
@@ -456,71 +478,119 @@ export function AppProvider({ children }: { children: ReactNode }) {
     setVenueForOwner(null)
   }, [])
 
-  const hydrateFromSession = useCallback(
-    async (client: SupabaseClient, session: Session | null) => {
-      authLog('Hydrate', 'session exists', { exists: Boolean(session?.user) })
-      authLog('Hydrate', 'user id', { id: session?.user?.id ?? null })
-
-      if (!session?.user) {
-        setAnalyticsUser(null)
-        setCurrentUser(null)
-        clearLists()
-        authLog('CurrentUser', 'null (sin session.user)')
-        return
+  const blockNonPlayerMobileAccess = useCallback(
+    async (
+      client: SupabaseClient,
+      appUser: User,
+      options?: { alert?: boolean }
+    ): Promise<boolean> => {
+      if (!isPlayerOnlyMobilePlatform() || isMobilePlayerAccount(appUser.accountType)) {
+        return true
       }
-
-      const authUser = session.user
-      const emailRaw =
-        authUser.email?.trim() || getAuthUserEmail(authUser)?.trim() || ''
-      const email =
-        emailRaw ||
-        `${authUser.id.replace(/-/g, '').slice(0, 12)}@session.sportmatch`
-      if (!emailRaw) {
-        authLog('Hydrate', 'sin email en session.user — fallback interno', {
-          id: authUser.id,
-        })
-      }
-
-      const fallbackUser = buildFallbackUserFromAuth(authUser, email)
-      setCurrentUser(fallbackUser)
-      setAnalyticsUser({ id: fallbackUser.id, email: fallbackUser.email })
-      authLog('CurrentUser', 'set fallback inmediato (hydrate)', {
-        id: fallbackUser.id,
-        missing_db_profile: true,
-      })
-
-      const { user: appUser, source } = await resolveAppUserFromAuth(
-        client,
-        authUser,
-        email
-      )
-
-      setCurrentUser(appUser)
-      setAnalyticsUser({ id: appUser.id, email: appUser.email })
-      authLog('CurrentUser', 'set after hydrate', {
-        id: appUser.id,
-        source,
-        missing_db_profile: Boolean(appUser.missingDbProfile),
-      })
-
-      if (appUser.accountType === 'admin') {
-        clearLists()
-        return
-      }
-
-      if (appUser.accountType === 'venue') {
-        clearLists()
-        const venueRow = await fetchVenueForOwner(client, authUser.id)
-        setVenueForOwner(venueRow)
-        return
-      }
-
+      await client.auth.signOut()
+      setAnalyticsUser(null)
+      setCurrentUser(null)
+      clearLists()
       setVenueForOwner(null)
-      if (source === 'profiles') {
-        await fetchAndSetPlayerData(client, authUser.id, appUser)
+      if (options?.alert !== false) {
+        Alert.alert(
+          MOBILE_ACCESS_ALERT_TITLE,
+          mobileAccessDeniedDetail(appUser.accountType),
+          [{ text: 'Entendido' }]
+        )
+      }
+      return false
+    },
+    [clearLists]
+  )
+
+  const beginProfileHydrate = useCallback((message = 'Preparando tu cancha…') => {
+    setProfileLoadingMessage(message)
+    profileHydrateOpsRef.current += 1
+    setProfileHydrating(true)
+  }, [])
+
+  const endProfileHydrate = useCallback(() => {
+    profileHydrateOpsRef.current = Math.max(0, profileHydrateOpsRef.current - 1)
+    if (profileHydrateOpsRef.current === 0) {
+      setProfileHydrating(false)
+    }
+  }, [])
+
+  const hydrateFromSession = useCallback(
+    async (
+      client: SupabaseClient,
+      session: Session | null,
+      options?: { showProfileLoader?: boolean; loadingMessage?: string }
+    ) => {
+      const showProfileLoader = options?.showProfileLoader ?? false
+      if (showProfileLoader) {
+        beginProfileHydrate(options?.loadingMessage ?? 'Preparando tu cancha…')
+      }
+
+      try {
+        authLog('Hydrate', 'session exists', { exists: Boolean(session?.user) })
+        authLog('Hydrate', 'user id', { id: session?.user?.id ?? null })
+
+        if (!session?.user) {
+          setAnalyticsUser(null)
+          setCurrentUser(null)
+          clearLists()
+          authLog('CurrentUser', 'null (sin session.user)')
+          return
+        }
+
+        const authUser = session.user
+        const emailRaw =
+          authUser.email?.trim() || getAuthUserEmail(authUser)?.trim() || ''
+        const email =
+          emailRaw ||
+          `${authUser.id.replace(/-/g, '').slice(0, 12)}@session.sportmatch`
+        if (!emailRaw) {
+          authLog('Hydrate', 'sin email en session.user — fallback interno', {
+            id: authUser.id,
+          })
+        }
+
+        const { user: appUser, source } = await resolveAppUserFromAuth(
+          client,
+          authUser,
+          email
+        )
+
+        if (!(await blockNonPlayerMobileAccess(client, appUser, { alert: false }))) {
+          return
+        }
+
+        setCurrentUser(appUser)
+        setAnalyticsUser({ id: appUser.id, email: appUser.email })
+        authLog('CurrentUser', 'set after hydrate', {
+          id: appUser.id,
+          source,
+          missing_db_profile: Boolean(appUser.missingDbProfile),
+        })
+
+        if (appUser.accountType === 'admin') {
+          clearLists()
+          return
+        }
+
+        if (appUser.accountType === 'venue') {
+          clearLists()
+          const venueRow = await fetchVenueForOwner(client, authUser.id)
+          setVenueForOwner(venueRow)
+          return
+        }
+
+        setVenueForOwner(null)
+        if (source === 'profiles') {
+          await fetchAndSetPlayerData(client, authUser.id, appUser)
+        }
+      } finally {
+        if (showProfileLoader) endProfileHydrate()
       }
     },
-    [clearLists, fetchAndSetPlayerData]
+    [beginProfileHydrate, blockNonPlayerMobileAccess, clearLists, endProfileHydrate, fetchAndSetPlayerData]
   )
 
   const syncAuthFromSession = useCallback(async (): Promise<boolean> => {
@@ -529,7 +599,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
       data: { session },
     } = await supabase.auth.getSession()
     if (!session?.user) return false
-    await hydrateFromSession(supabase, session)
+    await hydrateFromSession(supabase, session, {
+      showProfileLoader: true,
+      loadingMessage: 'Preparando tu cancha…',
+    })
     return true
   }, [supabase, hydrateFromSession])
 
@@ -565,6 +638,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
         if (event === 'SIGNED_OUT') {
           setAnalyticsUser(null)
           setCurrentUser(null)
+          profileHydrateOpsRef.current = 0
+          setProfileHydrating(false)
           clearLists()
           authLog('Session', 'SIGNED_OUT → currentUser null')
           return
@@ -576,7 +651,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
           session
         ) {
           authLog('Session', `hydrate tras ${event}`)
-          await hydrateFromSession(supabase, session)
+          await hydrateFromSession(supabase, session, {
+            showProfileLoader: event === 'SIGNED_IN',
+            loadingMessage: 'Preparando tu cancha…',
+          })
         }
       }
     )
@@ -704,30 +782,12 @@ export function AppProvider({ children }: { children: ReactNode }) {
           userEmail
         )
 
+        if (!(await blockNonPlayerMobileAccess(supabase, appUser, { alert: true }))) {
+          return fail(mobileAccessDeniedMessage(appUser.accountType))
+        }
+
         setCurrentUser(appUser)
         recordAuthSuccess(appUser)
-
-        if (appUser.accountType === 'admin') {
-          clearLists()
-          return {
-            ok: true,
-            needsOnboarding: false,
-            isVenue: false,
-            isAdmin: true,
-          }
-        }
-
-        if (appUser.accountType === 'venue') {
-          clearLists()
-          const venueRow = await fetchVenueForOwner(supabase, user.id)
-          setVenueForOwner(venueRow)
-          return {
-            ok: true,
-            needsOnboarding: false,
-            needsVenueOnboarding: !venueRow,
-            isVenue: true,
-          }
-        }
 
         if (source === 'profiles') {
           await fetchAndSetPlayerData(supabase, user.id, appUser)
@@ -756,7 +816,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         return { ok: false, error: msg }
       }
     },
-    [supabase, clearLists, fetchAndSetPlayerData]
+    [supabase, clearLists, fetchAndSetPlayerData, blockNonPlayerMobileAccess]
   )
 
   const loginWithGoogle = useCallback(
@@ -776,6 +836,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
             'Configura EXPO_PUBLIC_SUPABASE_URL y EXPO_PUBLIC_SUPABASE_ANON_KEY en .env',
         }
       }
+      beginProfileHydrate('Conectando con Google…')
       try {
         const fail = (msg: string, extra?: Record<string, unknown>): LoginResult => {
           trackProductEvent(ProductEventNames.loginFailed, {
@@ -825,7 +886,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
              * pantalla en blanco. En web seguimos en true para no hacer window.location.
              */
             skipBrowserRedirect: Platform.OS === 'web',
-            queryParams: isSignUp ? { prompt: 'consent' } : undefined,
+            queryParams: googleOAuthQueryParams(isSignUp),
           },
         })
         if (error) return fail(formatAuthError(error))
@@ -900,6 +961,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
           userEmail
         )
 
+        if (!(await blockNonPlayerMobileAccess(supabase, appUser, { alert: true }))) {
+          return fail(mobileAccessDeniedMessage(appUser.accountType))
+        }
+
         setCurrentUser(appUser)
         authLog('Session', 'loginWithGoogle setCurrentUser', {
           profile_id: appUser.id,
@@ -907,28 +972,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
           source,
         })
         recordAuthSuccess(appUser)
-
-        if (appUser.accountType === 'admin') {
-          clearLists()
-          return {
-            ok: true,
-            needsOnboarding: false,
-            isVenue: false,
-            isAdmin: true,
-          }
-        }
-
-        if (appUser.accountType === 'venue') {
-          clearLists()
-          const venueRow = await fetchVenueForOwner(supabase, user.id)
-          setVenueForOwner(venueRow)
-          return {
-            ok: true,
-            needsOnboarding: false,
-            needsVenueOnboarding: !venueRow,
-            isVenue: true,
-          }
-        }
 
         if (source === 'profiles') {
           await fetchAndSetPlayerData(supabase, user.id, appUser)
@@ -954,9 +997,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
           supabase,
         })
         return { ok: false, error: msg }
+      } finally {
+        endProfileHydrate()
       }
     },
-    [supabase, clearLists, fetchAndSetPlayerData]
+    [supabase, clearLists, fetchAndSetPlayerData, beginProfileHydrate, endProfileHydrate, blockNonPlayerMobileAccess]
   )
 
   const resolveTeamPickPrivateJoinCode = useCallback(
@@ -2591,10 +2636,13 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const value = useMemo<AppContextType>(
     () => ({
       authLoading,
+      profileHydrating,
+      profileLoadingMessage,
       currentUser,
       isAuthenticated: currentUser !== null,
       syncAuthFromSession,
       needsOnboarding:
+        !profileHydrating &&
         currentUser !== null &&
         (needsOnboardingProfile(currentUser) ||
           currentUser.missingDbProfile === true),
@@ -2652,6 +2700,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
     }),
     [
       authLoading,
+      profileHydrating,
+      profileLoadingMessage,
       currentUser,
       syncAuthFromSession,
       matchOpportunities,

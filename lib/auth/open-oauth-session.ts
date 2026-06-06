@@ -2,7 +2,7 @@ import * as Linking from 'expo-linking'
 import * as WebBrowser from 'expo-web-browser'
 import { Platform } from 'react-native'
 
-import { oauthRedirectHasCredentials } from '../oauth-redirect'
+import { isOAuthReturnUrl } from '../oauth-redirect'
 import { authLog } from './auth-debug'
 import { consumePendingOAuthUrl } from './oauth-callback-handler'
 import { releaseOAuthLock, tryAcquireOAuthLock } from './oauth-session-lock'
@@ -77,9 +77,9 @@ export async function openOAuthAndResolveCallbackUrl(
       }
 
       const succeed = (url: string, source: 'webbrowser' | 'linking') => {
-        if (settled || !oauthRedirectHasCredentials(url)) {
-          if (!oauthRedirectHasCredentials(url)) {
-            authLog('DeepLink', 'URL ignorada (sin code/tokens)', {
+        if (settled || !isOAuthReturnUrl(url)) {
+          if (!isOAuthReturnUrl(url)) {
+            authLog('DeepLink', 'URL ignorada (sin code/tokens o host inválido)', {
               source,
               preview: url.slice(0, 120),
             })
@@ -88,6 +88,7 @@ export async function openOAuthAndResolveCallbackUrl(
         }
         settled = true
         cleanup()
+        void WebBrowser.dismissBrowser()
         authLog('DeepLink', 'callback OAuth resuelto', {
           source,
           has_code: url.includes('code='),

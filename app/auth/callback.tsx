@@ -1,8 +1,8 @@
 import * as Linking from 'expo-linking'
 import { Redirect, router, useGlobalSearchParams } from 'expo-router'
 import { useEffect, useRef, useState } from 'react'
-import { ActivityIndicator, StyleSheet, Text, View } from 'react-native'
 
+import { AuthProfileLoadingScreen } from '../../components/auth-profile-loading-screen'
 import { useApp } from '../../lib/app-provider'
 import { authLog } from '../../lib/auth/auth-debug'
 import { recoverOAuthCallbackFromAllSources } from '../../lib/auth/oauth-callback-handler'
@@ -20,7 +20,7 @@ export default function AuthCallbackScreen() {
     error_description?: string | string[]
   }>()
   const linkingUrl = Linking.useURL()
-  const { authLoading, isAuthenticated, currentUser, syncAuthFromSession } =
+  const { authLoading, isAuthenticated, currentUser, profileHydrating, syncAuthFromSession } =
     useApp()
   const [exchangeError, setExchangeError] = useState<string | null>(null)
   const [exchangeDone, setExchangeDone] = useState(false)
@@ -106,40 +106,21 @@ export default function AuthCallbackScreen() {
     }
   }, [isAuthenticated, currentUser])
 
-  if (isAuthenticated) {
+  if (isAuthenticated && !profileHydrating) {
     return <Redirect href="/" />
   }
 
+  if (profileHydrating) {
+    return null
+  }
+
   return (
-    <View style={styles.center}>
-      <ActivityIndicator size="large" color="#0F4539" />
-      {exchangeError ? (
-        <Text style={styles.error}>{exchangeError}</Text>
-      ) : (
-        <Text style={styles.hint}>Completando inicio de sesión…</Text>
-      )}
-    </View>
+    <AuthProfileLoadingScreen
+      message={
+        exchangeError
+          ? exchangeError
+          : 'Completando inicio de sesión…'
+      }
+    />
   )
 }
-
-const styles = StyleSheet.create({
-  center: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    backgroundColor: '#fff',
-    padding: 24,
-  },
-  hint: {
-    marginTop: 16,
-    fontSize: 15,
-    color: '#374151',
-    textAlign: 'center',
-  },
-  error: {
-    marginTop: 16,
-    fontSize: 14,
-    color: '#b91c1c',
-    textAlign: 'center',
-  },
-})

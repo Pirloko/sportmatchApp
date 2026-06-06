@@ -1,4 +1,5 @@
 import { Ionicons } from '@expo/vector-icons'
+import { Image } from 'expo-image'
 import { router } from 'expo-router'
 import {
   useCallback,
@@ -46,6 +47,7 @@ import { computeVenueAvailableSlots, labelForHm } from '../lib/venue-slots'
 import { levelLabel } from '../lib/format-match'
 import { clearCreatePrefill, readCreatePrefill } from '../lib/create-prefill'
 import { consumeRivalTargetTeamId } from '../lib/rival-prefill'
+import { teamIsInSameCity } from '../lib/team-discovery'
 
 const GUIDELINES: string[] = [
   'Respeto y buena convivencia: trata a rivales y compañeros con educación; el fútbol amateur es para pasarlo bien.',
@@ -65,6 +67,7 @@ const LEVELS: { value: Level; label: string }[] = [
 
 type FlowType = MatchType | 'reserve' | 'team_pick_flow' | null
 const PLAYERS_FLOW_ENABLED = false
+const RESERVE_FLOW_ENABLED = false
 
 const TEAM_PICK_ROLES: { value: TeamPickRole; label: string }[] = [
   { value: 'gk', label: 'Arquero' },
@@ -191,7 +194,9 @@ export function CreateMatchScreen() {
     void (async () => {
       const tid = await consumeRivalTargetTeamId()
       if (!tid || cancelled || !currentUser) return
-      const others = getFilteredTeams(currentUser.gender)
+      const others = getFilteredTeams(currentUser.gender).filter((t) =>
+        teamIsInSameCity(currentUser, t)
+      )
       const rival = others.find((x) => x.id === tid)
       if (rival) {
         setMatchType('rival')
@@ -346,12 +351,38 @@ export function CreateMatchScreen() {
   ])
 
   const userTeams = getUserTeams()
+
+  useEffect(() => {
+    if (step !== 2 || matchType !== 'rival' || userTeams.length !== 1) return
+    const onlyTeam = userTeams[0]
+    setSelectedTeam((prev) => (prev?.id === onlyTeam.id ? prev : onlyTeam))
+  }, [step, matchType, userTeams])
   const allTeams = currentUser ? getFilteredTeams(currentUser.gender) : []
-  const rivalTeams = allTeams
-    .filter(
-      (t) => t.id !== selectedTeam?.id && !userTeams.some((ut) => ut.id === t.id)
-    )
-    .filter((t) => t.name.toLowerCase().includes(rivalSearch.toLowerCase()))
+  const rivalTeamsInCity = useMemo(() => {
+    if (!currentUser) return []
+    return allTeams
+      .filter(
+        (t) =>
+          t.id !== selectedTeam?.id && !userTeams.some((ut) => ut.id === t.id)
+      )
+      .filter((t) => teamIsInSameCity(currentUser, t))
+      .sort((a, b) => a.name.localeCompare(b.name, 'es', { sensitivity: 'base' }))
+  }, [allTeams, currentUser, selectedTeam, userTeams])
+
+  const rivalTeams = useMemo(() => {
+    const q = rivalSearch.trim().toLowerCase()
+    if (!q) return rivalTeamsInCity
+    return rivalTeamsInCity.filter((t) => t.name.toLowerCase().includes(q))
+  }, [rivalTeamsInCity, rivalSearch])
+
+  useEffect(() => {
+    if (!selectedRivalTeam) return
+    if (!rivalTeamsInCity.some((t) => t.id === selectedRivalTeam.id)) {
+      setSelectedRivalTeam(null)
+    }
+  }, [rivalTeamsInCity, selectedRivalTeam])
+
+  const creatorCityLabel = currentUser?.city?.trim() || 'tu ciudad'
 
   const handleBack = () => {
     if (step > 1) {
@@ -435,36 +466,30 @@ export function CreateMatchScreen() {
 
   const renderUserTeamRow = useCallback(
     ({ item: team }: ListRenderItemInfo<Team>) => (
-      <Pressable
-        style={[
-          styles.teamCard,
-          selectedTeam?.id === team.id && styles.teamCardOn,
-        ]}
+      <TeamSelectCard
+        team={team}
+        selected={selectedTeam?.id === team.id}
+        variant="mine"
+        layout="list"
+        theme={theme}
         onPress={() => setSelectedTeam(team)}
-      >
-        <Text style={styles.teamName}>{team.name}</Text>
-        <Text style={styles.teamMeta}>
-          {levelLabel(team.level)} · {team.members.length}/6
-        </Text>
-      </Pressable>
+      />
     ),
-    [selectedTeam]
+    [selectedTeam, theme]
   )
 
   const renderRivalTeamRow = useCallback(
     ({ item: team }: ListRenderItemInfo<Team>) => (
-      <Pressable
-        style={[
-          styles.teamCard,
-          selectedRivalTeam?.id === team.id && styles.teamCardRivalOn,
-        ]}
+      <TeamSelectCard
+        team={team}
+        selected={selectedRivalTeam?.id === team.id}
+        variant="rival"
+        layout="list"
+        theme={theme}
         onPress={() => setSelectedRivalTeam(team)}
-      >
-        <Text style={styles.teamName}>{team.name}</Text>
-        <Text style={styles.teamMeta}>{levelLabel(team.level)}</Text>
-      </Pressable>
+      />
     ),
-    [selectedRivalTeam]
+    [selectedRivalTeam, theme]
   )
 
   const alternativesBlock = useMemo(
@@ -927,14 +952,16 @@ export function CreateMatchScreen() {
               tone="gold"
               icon="git-compare-outline"
             />
-            <TypeCard
-              title="Solo reservar cancha"
-              desc="Sin crear partido"
-              selected={matchType === 'reserve'}
-              onPress={() => setMatchType('reserve')}
-              tone="blue"
-              icon="calendar-outline"
-            />
+            {RESERVE_FLOW_ENABLED ? (
+              <TypeCard
+                title="Solo reservar cancha"
+                desc="Sin crear partido"
+                selected={matchType === 'reserve'}
+                onPress={() => setMatchType('reserve')}
+                tone="blue"
+                icon="calendar-outline"
+              />
+            ) : null}
             <Pressable
               style={[styles.primaryBtn, !matchType && styles.btnDisabled]}
               disabled={!matchType}
@@ -1070,15 +1097,55 @@ export function CreateMatchScreen() {
         {step === 2 && matchType === 'rival' && (
           <View style={styles.section}>
             <Text style={styles.h2}>Tu equipo</Text>
-            <View style={styles.embeddedListWrap}>
-              <FlatList
-                data={userTeams}
-                keyExtractor={(t) => t.id}
-                renderItem={renderUserTeamRow}
-                nestedScrollEnabled
-                showsVerticalScrollIndicator={false}
+            <Text style={[styles.h2Sub, { color: theme.textMuted }]}>
+              Elige con qué equipo publicarás el desafío rival
+            </Text>
+
+            {userTeams.length === 1 ? (
+              <TeamSelectCard
+                team={userTeams[0]}
+                selected={selectedTeam?.id === userTeams[0].id}
+                variant="mine"
+                layout="hero"
+                theme={theme}
+                onPress={() => setSelectedTeam(userTeams[0])}
               />
-            </View>
+            ) : (
+              <View style={styles.embeddedListWrap}>
+                <FlatList
+                  data={userTeams}
+                  keyExtractor={(t) => t.id}
+                  renderItem={renderUserTeamRow}
+                  nestedScrollEnabled
+                  showsVerticalScrollIndicator={false}
+                  contentContainerStyle={styles.teamSelectListContent}
+                />
+              </View>
+            )}
+
+            {selectedTeam ? (
+              <View
+                style={[
+                  styles.teamSelectHint,
+                  {
+                    backgroundColor: theme.selectedTint,
+                    borderColor: theme.isDark
+                      ? 'rgba(102, 208, 111, 0.35)'
+                      : 'rgba(15, 69, 57, 0.15)',
+                  },
+                ]}
+              >
+                <Ionicons name="checkmark-circle" size={18} color={theme.primary} />
+                <Text style={[styles.teamSelectHintText, { color: theme.text }]}>
+                  {selectedTeam.name} listo para desafiar
+                </Text>
+              </View>
+            ) : (
+              <Text style={[styles.teamSelectEmptyHint, { color: theme.textMuted }]}>
+                Toca un equipo para continuar
+              </Text>
+            )}
+
             <Pressable
               style={[styles.primaryBtn, !selectedTeam && styles.btnDisabled]}
               disabled={!selectedTeam}
@@ -1092,39 +1159,164 @@ export function CreateMatchScreen() {
         {step === 3 && matchType === 'rival' && selectedTeam && (
           <View style={styles.section}>
             <Text style={styles.h2}>Rival</Text>
-            <View style={styles.modeRow}>
+            <Text style={[styles.h2Sub, { color: theme.textMuted }]}>
+              Elige cómo quieres encontrar al equipo contrincante
+            </Text>
+
+            <View style={styles.rivalModeRow}>
               <Pressable
                 style={[
-                  styles.modeBtn,
-                  rivalMode === 'open' && styles.modeBtnOn,
+                  styles.rivalModeCard,
+                  {
+                    backgroundColor: theme.cardElevated,
+                    borderColor:
+                      rivalMode === 'open' ? theme.primary : theme.border,
+                  },
+                  rivalMode === 'open' && {
+                    backgroundColor: theme.selectedTint,
+                  },
                 ]}
                 onPress={() => {
                   setRivalMode('open')
                   setSelectedRivalTeam(null)
+                  setRivalSearch('')
                 }}
               >
-                <Text style={styles.modeBtnText}>Búsqueda abierta</Text>
+                <View
+                  style={[
+                    styles.rivalModeIcon,
+                    { backgroundColor: `${theme.primary}22` },
+                  ]}
+                >
+                  <Ionicons name="globe-outline" size={20} color={theme.primary} />
+                </View>
+                <Text style={[styles.rivalModeTitle, { color: theme.text }]}>
+                  Búsqueda abierta
+                </Text>
+                <Text style={[styles.rivalModeDesc, { color: theme.textMuted }]}>
+                  Cualquier capitán de {creatorCityLabel} puede aceptar
+                </Text>
               </Pressable>
+
               <Pressable
                 style={[
-                  styles.modeBtn,
-                  rivalMode === 'direct' && styles.modeBtnDirect,
+                  styles.rivalModeCard,
+                  {
+                    backgroundColor: theme.cardElevated,
+                    borderColor:
+                      rivalMode === 'direct' ? theme.danger : theme.border,
+                  },
+                  rivalMode === 'direct' && {
+                    backgroundColor: theme.dangerSurface,
+                  },
                 ]}
                 onPress={() => setRivalMode('direct')}
               >
-                <Text style={styles.modeBtnText}>Equipo específico</Text>
+                <View
+                  style={[
+                    styles.rivalModeIcon,
+                    { backgroundColor: 'rgba(239,68,68,0.15)' },
+                  ]}
+                >
+                  <Ionicons name="locate-outline" size={20} color={theme.danger} />
+                </View>
+                <Text style={[styles.rivalModeTitle, { color: theme.text }]}>
+                  Equipo específico
+                </Text>
+                <Text style={[styles.rivalModeDesc, { color: theme.textMuted }]}>
+                  Desafía directamente a un equipo de tu ciudad
+                </Text>
               </Pressable>
             </View>
-            {rivalMode === 'direct' && (
+
+            {rivalMode === 'open' ? (
+              <View
+                style={[
+                  styles.rivalOpenInfo,
+                  {
+                    backgroundColor: theme.selectedTint,
+                    borderColor: theme.isDark
+                      ? 'rgba(102, 208, 111, 0.35)'
+                      : 'rgba(15, 69, 57, 0.15)',
+                  },
+                ]}
+              >
+                <Ionicons name="megaphone-outline" size={20} color={theme.primary} />
+                <Text style={[styles.rivalOpenInfoText, { color: theme.text }]}>
+                  Publicarás el desafío y el primer capitán interesado en{' '}
+                  {creatorCityLabel} podrá responder.
+                </Text>
+              </View>
+            ) : (
               <>
-                <TextInput
-                  style={styles.input}
-                  placeholder="Buscar equipo…"
-                  value={rivalSearch}
-                  onChangeText={setRivalSearch}
-                />
+                <View
+                  style={[
+                    styles.rivalCityChip,
+                    {
+                      backgroundColor: theme.chipBg,
+                      borderColor: theme.chipBorder,
+                    },
+                  ]}
+                >
+                  <Ionicons name="location-outline" size={16} color={theme.primaryAccent} />
+                  <Text style={[styles.rivalCityChipText, { color: theme.text }]}>
+                    Equipos en {creatorCityLabel}
+                  </Text>
+                  <Text style={[styles.rivalCityChipCount, { color: theme.textMuted }]}>
+                    {rivalTeamsInCity.length}
+                  </Text>
+                </View>
+
+                <View
+                  style={[
+                    styles.rivalSearchWrap,
+                    {
+                      backgroundColor: theme.inputBg,
+                      borderColor: theme.inputBorder,
+                    },
+                  ]}
+                >
+                  <Ionicons name="search-outline" size={18} color={theme.textMuted} />
+                  <TextInput
+                    style={[styles.rivalSearchInput, { color: theme.text }]}
+                    placeholder="Buscar equipo…"
+                    placeholderTextColor={theme.textMuted}
+                    value={rivalSearch}
+                    onChangeText={setRivalSearch}
+                  />
+                  {rivalSearch.length > 0 ? (
+                    <Pressable hitSlop={8} onPress={() => setRivalSearch('')}>
+                      <Ionicons name="close-circle" size={18} color={theme.textMuted} />
+                    </Pressable>
+                  ) : null}
+                </View>
+
                 {rivalTeams.length === 0 ? (
-                  <Text style={styles.muted}>No hay equipos con ese criterio.</Text>
+                  <View
+                    style={[
+                      styles.rivalEmptyBox,
+                      {
+                        backgroundColor: theme.cardElevated,
+                        borderColor: theme.border,
+                      },
+                    ]}
+                  >
+                    <Ionicons
+                      name={rivalTeamsInCity.length === 0 ? 'people-outline' : 'search-outline'}
+                      size={28}
+                      color={theme.textMuted}
+                    />
+                    <Text style={[styles.rivalEmptyTitle, { color: theme.text }]}>
+                      {rivalTeamsInCity.length === 0
+                        ? 'Sin equipos en tu ciudad'
+                        : 'Sin resultados'}
+                    </Text>
+                    <Text style={[styles.rivalEmptyBody, { color: theme.textMuted }]}>
+                      {rivalTeamsInCity.length === 0
+                        ? `Aún no hay otros equipos rivales en ${creatorCityLabel}. Prueba con búsqueda abierta.`
+                        : 'Prueba otro nombre o borra la búsqueda.'}
+                    </Text>
+                  </View>
                 ) : (
                   <View style={styles.embeddedListWrap}>
                     <FlatList
@@ -1133,14 +1325,66 @@ export function CreateMatchScreen() {
                       renderItem={renderRivalTeamRow}
                       nestedScrollEnabled
                       showsVerticalScrollIndicator={false}
+                      contentContainerStyle={styles.teamSelectListContent}
                     />
                   </View>
                 )}
+
+                {selectedRivalTeam ? (
+                  <View
+                    style={[
+                      styles.rivalSelectedHint,
+                      {
+                        backgroundColor: theme.dangerSurface,
+                        borderColor: theme.isDark
+                          ? 'rgba(239, 68, 68, 0.4)'
+                          : 'rgba(239, 68, 68, 0.25)',
+                      },
+                    ]}
+                  >
+                    <View
+                      style={[
+                        styles.rivalSelectedLogo,
+                        {
+                          backgroundColor: theme.logoBoxBg,
+                          borderColor: theme.logoBoxBorder,
+                        },
+                      ]}
+                    >
+                      {selectedRivalTeam.logo ? (
+                        <Image
+                          source={{ uri: selectedRivalTeam.logo }}
+                          style={styles.rivalSelectedLogoImg}
+                          contentFit="cover"
+                        />
+                      ) : (
+                        <Ionicons name="shield" size={18} color={theme.danger} />
+                      )}
+                    </View>
+                    <View style={styles.rivalSelectedTextCol}>
+                      <Text style={[styles.rivalSelectedLabel, { color: theme.textMuted }]}>
+                        Rival elegido
+                      </Text>
+                      <Text
+                        style={[styles.rivalSelectedName, { color: theme.text }]}
+                        numberOfLines={1}
+                      >
+                        {selectedRivalTeam.name}
+                      </Text>
+                    </View>
+                    <Ionicons name="checkmark-circle" size={22} color={theme.danger} />
+                  </View>
+                ) : rivalTeams.length > 0 ? (
+                  <Text style={[styles.teamSelectEmptyHint, { color: theme.textMuted }]}>
+                    Toca un equipo rival para continuar
+                  </Text>
+                ) : null}
               </>
             )}
+
             <Pressable
               style={[
-                styles.dangerBtn,
+                rivalMode === 'direct' ? styles.dangerBtn : styles.primaryBtn,
                 rivalMode === 'direct' && !selectedRivalTeam && styles.btnDisabled,
               ]}
               disabled={rivalMode === 'direct' && !selectedRivalTeam}
@@ -2326,6 +2570,293 @@ function RevFieldIconLabel({
   )
 }
 
+function teamGenderLabel(gender: Team['gender']): string {
+  return gender === 'female' ? 'Femenino' : 'Masculino'
+}
+
+function TeamSelectCard({
+  team,
+  selected,
+  variant,
+  layout,
+  theme,
+  onPress,
+}: {
+  team: Team
+  selected: boolean
+  variant: 'mine' | 'rival'
+  layout: 'list' | 'hero'
+  theme: ReturnType<typeof useScreenTheme>
+  onPress: () => void
+}) {
+  const isHero = layout === 'hero'
+  const accentColor = variant === 'rival' ? theme.danger : theme.primary
+  const selectedBg =
+    variant === 'rival'
+      ? theme.isDark
+        ? 'rgba(239, 68, 68, 0.12)'
+        : 'rgba(239, 68, 68, 0.08)'
+      : theme.selectedTint
+
+  const logoSize = isHero ? 88 : 56
+  const logoRadius = isHero ? 20 : 14
+
+  return (
+    <Pressable
+      onPress={onPress}
+      style={[
+        isHero ? teamSelectStyles.heroCard : teamSelectStyles.listCard,
+        {
+          backgroundColor: theme.cardElevated,
+          borderColor: selected ? accentColor : theme.border,
+          shadowColor: selected ? accentColor : '#000',
+        },
+        selected && {
+          borderWidth: 2,
+          backgroundColor: selectedBg,
+          shadowOpacity: theme.isDark ? 0.35 : 0.12,
+          shadowRadius: 16,
+          shadowOffset: { width: 0, height: 8 },
+          elevation: selected ? 4 : 0,
+        },
+        !selected && { borderWidth: 1 },
+      ]}
+    >
+      {isHero ? (
+        <View style={teamSelectStyles.heroInner}>
+          <View
+            style={[
+              teamSelectStyles.logoRing,
+              {
+                borderColor: selected ? accentColor : theme.logoBoxBorder,
+                backgroundColor: theme.logoBoxBg,
+              },
+            ]}
+          >
+            {team.logo ? (
+              <Image
+                source={{ uri: team.logo }}
+                style={{ width: logoSize, height: logoSize, borderRadius: logoRadius }}
+                contentFit="cover"
+              />
+            ) : (
+              <View
+                style={[
+                  teamSelectStyles.logoFallback,
+                  { width: logoSize, height: logoSize, borderRadius: logoRadius },
+                ]}
+              >
+                <Ionicons name="shield" size={36} color={theme.primaryAccent} />
+              </View>
+            )}
+          </View>
+
+          <Text style={[teamSelectStyles.heroName, { color: theme.text }]} numberOfLines={2}>
+            {team.name}
+          </Text>
+
+          <View style={teamSelectStyles.metaChipRow}>
+            <View
+              style={[
+                teamSelectStyles.metaChip,
+                { backgroundColor: theme.chipBg, borderColor: theme.chipBorder },
+              ]}
+            >
+              <Ionicons name="trophy-outline" size={14} color={theme.primaryAccent} />
+              <Text style={[teamSelectStyles.metaChipText, { color: theme.text }]}>
+                {levelLabel(team.level)}
+              </Text>
+            </View>
+            <View
+              style={[
+                teamSelectStyles.metaChip,
+                { backgroundColor: theme.chipBg, borderColor: theme.chipBorder },
+              ]}
+            >
+              <Ionicons name="people-outline" size={14} color={theme.primaryAccent} />
+              <Text style={[teamSelectStyles.metaChipText, { color: theme.text }]}>
+                {team.members.length}/6 jugadores
+              </Text>
+            </View>
+          </View>
+
+          {team.city ? (
+            <View style={teamSelectStyles.heroCityRow}>
+              <Ionicons name="location-outline" size={15} color={theme.textMuted} />
+              <Text style={[teamSelectStyles.heroCity, { color: theme.textMuted }]}>
+                {team.city} · {teamGenderLabel(team.gender)}
+              </Text>
+            </View>
+          ) : null}
+
+          {selected ? (
+            <View
+              style={[
+                teamSelectStyles.selectedPill,
+                { backgroundColor: `${accentColor}22`, borderColor: accentColor },
+              ]}
+            >
+              <Ionicons name="checkmark-circle" size={16} color={accentColor} />
+              <Text style={[teamSelectStyles.selectedPillText, { color: accentColor }]}>
+                Seleccionado para el desafío
+              </Text>
+            </View>
+          ) : (
+            <Text style={[teamSelectStyles.heroTapHint, { color: theme.textMuted }]}>
+              Toca para seleccionar este equipo
+            </Text>
+          )}
+        </View>
+      ) : (
+        <View style={teamSelectStyles.listRow}>
+          <View
+            style={[
+              teamSelectStyles.listLogoBox,
+              {
+                backgroundColor: theme.logoBoxBg,
+                borderColor: theme.logoBoxBorder,
+              },
+            ]}
+          >
+            {team.logo ? (
+              <Image
+                source={{ uri: team.logo }}
+                style={teamSelectStyles.listLogoImg}
+                contentFit="cover"
+              />
+            ) : (
+              <Ionicons name="shield" size={24} color={theme.primaryAccent} />
+            )}
+          </View>
+
+          <View style={teamSelectStyles.listTextCol}>
+            <Text style={[teamSelectStyles.listName, { color: theme.text }]} numberOfLines={1}>
+              {team.name}
+            </Text>
+            <Text style={[teamSelectStyles.listMeta, { color: theme.textMuted }]}>
+              {levelLabel(team.level)} · {team.members.length}/6
+              {team.city ? ` · ${team.city}` : ''}
+            </Text>
+          </View>
+
+          <View
+            style={[
+              teamSelectStyles.listCheck,
+              {
+                borderColor: selected ? accentColor : theme.border,
+                backgroundColor: selected ? accentColor : 'transparent',
+              },
+            ]}
+          >
+            {selected ? (
+              <Ionicons
+                name="checkmark"
+                size={16}
+                color={variant === 'rival' ? '#fff' : theme.primaryBtnText}
+              />
+            ) : null}
+          </View>
+        </View>
+      )}
+    </Pressable>
+  )
+}
+
+const teamSelectStyles = StyleSheet.create({
+  heroCard: {
+    marginTop: 8,
+    borderRadius: 20,
+    paddingVertical: 28,
+    paddingHorizontal: 20,
+  },
+  heroInner: { alignItems: 'center' },
+  logoRing: {
+    padding: 4,
+    borderRadius: 24,
+    borderWidth: 2,
+    marginBottom: 16,
+  },
+  logoFallback: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(102, 208, 111, 0.08)',
+  },
+  heroName: {
+    fontSize: 22,
+    fontWeight: '800',
+    textAlign: 'center',
+    letterSpacing: 0.3,
+    marginBottom: 12,
+  },
+  metaChipRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'center',
+    gap: 8,
+    marginBottom: 10,
+  },
+  metaChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+    borderRadius: 999,
+    borderWidth: 1,
+  },
+  metaChipText: { fontSize: 13, fontWeight: '600' },
+  heroCityRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    marginBottom: 14,
+  },
+  heroCity: { fontSize: 13, fontWeight: '500' },
+  selectedPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginTop: 6,
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderRadius: 999,
+    borderWidth: 1,
+  },
+  selectedPillText: { fontSize: 13, fontWeight: '700' },
+  heroTapHint: { fontSize: 13, marginTop: 8, fontWeight: '500' },
+  listCard: {
+    borderRadius: 16,
+    padding: 14,
+    marginBottom: 10,
+  },
+  listRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  listLogoBox: {
+    width: 56,
+    height: 56,
+    borderRadius: 14,
+    borderWidth: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    overflow: 'hidden',
+  },
+  listLogoImg: { width: 56, height: 56 },
+  listTextCol: { flex: 1, minWidth: 0 },
+  listName: { fontSize: 16, fontWeight: '800' },
+  listMeta: { fontSize: 13, marginTop: 3, fontWeight: '500' },
+  listCheck: {
+    width: 26,
+    height: 26,
+    borderRadius: 13,
+    borderWidth: 2,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+})
+
 function TypeCard({
   title,
   desc,
@@ -2649,13 +3180,129 @@ function createStyles(theme: ReturnType<typeof useScreenTheme>) {
   teamCardOn: {
     borderColor: theme.primary,
     borderWidth: 2,
-    backgroundColor: theme.isDark ? 'rgba(37,99,235,0.12)' : 'rgba(37,99,235,0.06)',
+    backgroundColor: theme.selectedTint,
   },
   teamCardRivalOn: {
     borderColor: theme.danger,
     borderWidth: 2,
-    backgroundColor: theme.isDark ? 'rgba(220,38,38,0.12)' : 'rgba(220,38,38,0.06)',
+    backgroundColor: theme.isDark ? 'rgba(239,68,68,0.12)' : 'rgba(239,68,68,0.08)',
   },
+  teamSelectListContent: { paddingTop: 8, paddingBottom: 4 },
+  teamSelectHint: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginTop: 16,
+    paddingVertical: 12,
+    paddingHorizontal: 14,
+    borderRadius: 12,
+    borderWidth: 1,
+  },
+  teamSelectHintText: { fontSize: 14, fontWeight: '600', flex: 1 },
+  teamSelectEmptyHint: {
+    fontSize: 13,
+    marginTop: 14,
+    textAlign: 'center',
+    fontWeight: '500',
+  },
+  rivalModeRow: { gap: 10, marginTop: 4 },
+  rivalModeCard: {
+    borderRadius: 16,
+    borderWidth: 2,
+    padding: 14,
+  },
+  rivalModeIcon: {
+    width: 40,
+    height: 40,
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 10,
+  },
+  rivalModeTitle: { fontSize: 15, fontWeight: '800', marginBottom: 4 },
+  rivalModeDesc: { fontSize: 13, lineHeight: 18 },
+  rivalOpenInfo: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 10,
+    marginTop: 16,
+    padding: 14,
+    borderRadius: 14,
+    borderWidth: 1,
+  },
+  rivalOpenInfoText: { flex: 1, fontSize: 14, lineHeight: 20, fontWeight: '500' },
+  rivalCityChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginTop: 16,
+    marginBottom: 12,
+    paddingVertical: 10,
+    paddingHorizontal: 14,
+    borderRadius: 999,
+    borderWidth: 1,
+    alignSelf: 'flex-start',
+  },
+  rivalCityChipText: { fontSize: 13, fontWeight: '700' },
+  rivalCityChipCount: { fontSize: 12, fontWeight: '600' },
+  rivalSearchWrap: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    borderWidth: 1,
+    borderRadius: 14,
+    paddingHorizontal: 14,
+    paddingVertical: 4,
+    marginBottom: 12,
+  },
+  rivalSearchInput: {
+    flex: 1,
+    fontSize: 16,
+    paddingVertical: 10,
+  },
+  rivalEmptyBox: {
+    alignItems: 'center',
+    paddingVertical: 28,
+    paddingHorizontal: 20,
+    borderRadius: 16,
+    borderWidth: 1,
+    marginBottom: 8,
+  },
+  rivalEmptyTitle: {
+    fontSize: 16,
+    fontWeight: '800',
+    marginTop: 12,
+    textAlign: 'center',
+  },
+  rivalEmptyBody: {
+    fontSize: 14,
+    lineHeight: 20,
+    marginTop: 6,
+    textAlign: 'center',
+  },
+  rivalSelectedHint: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    marginTop: 14,
+    paddingVertical: 12,
+    paddingHorizontal: 14,
+    borderRadius: 14,
+    borderWidth: 1,
+  },
+  rivalSelectedLogo: {
+    width: 40,
+    height: 40,
+    borderRadius: 10,
+    borderWidth: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    overflow: 'hidden',
+  },
+  rivalSelectedLogoImg: { width: 40, height: 40 },
+  rivalSelectedTextCol: { flex: 1, minWidth: 0 },
+  rivalSelectedLabel: { fontSize: 11, fontWeight: '600', textTransform: 'uppercase' },
+  rivalSelectedName: { fontSize: 15, fontWeight: '800', marginTop: 2 },
   teamName: { fontSize: 16, fontWeight: '700', color: theme.text },
   teamMeta: { fontSize: 13, color: theme.textMuted, marginTop: 4 },
   modeRow: { flexDirection: 'row', gap: 8 },

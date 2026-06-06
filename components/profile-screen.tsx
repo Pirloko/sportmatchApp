@@ -461,12 +461,16 @@ export function ProfileScreen() {
                   <Ionicons name="camera" size={18} color={theme.primaryBtnText} />
                 </Pressable>
               </View>
+              <Pressable
+                style={styles.changePhotoBtn}
+                onPress={() => void pickProfilePhoto()}
+                disabled={photoWorking}
+              >
+                <Text style={[styles.changePhoto, { color: theme.textMuted }]}>
+                  Cambiar foto
+                </Text>
+              </Pressable>
             </View>
-            <Pressable onPress={() => void pickProfilePhoto()} disabled={photoWorking}>
-              <Text style={[styles.changePhoto, { color: theme.textMuted }]}>
-                Cambiar foto
-              </Text>
-            </Pressable>
 
             <Text style={[styles.name, { color: theme.text }]}>
               {currentUser.name}
@@ -1189,11 +1193,14 @@ function createStyles(theme: ReturnType<typeof useScreenTheme>) {
     borderWidth: 3,
     borderColor: theme.card,
   },
-  changePhoto: {
-    fontSize: 12,
-    color: theme.textMuted,
+  changePhotoBtn: {
+    alignSelf: 'center',
     marginTop: 8,
     marginBottom: 4,
+  },
+  changePhoto: {
+    fontSize: 12,
+    textAlign: 'center',
   },
   name: {
     fontSize: 20,

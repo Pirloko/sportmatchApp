@@ -178,7 +178,7 @@ export function AuthScreen() {
 
         <Animated.View style={[styles.logoWrap, { transform: [{ translateY: floatAnim }] }]}>
           <Image
-            source={require('../assets/logohome.webp')}
+            source={require('../assets/sportmatch-logo.png')}
             style={styles.logo}
             resizeMode="contain"
           />
@@ -484,8 +484,8 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   logo: {
-    width: 210,
-    height: 210,
+    width: 200,
+    height: 240,
   },
   hint: {
     fontSize: 16,

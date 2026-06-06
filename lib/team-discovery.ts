@@ -9,7 +9,23 @@ export function normalizeLocationKey(v: string | null | undefined): string {
 }
 
 /**
- * Equipo “cerca” del jugador: mismo género ya va en `getFilteredTeams`.
+ * Misma ciudad que el jugador (texto o city_id). Sin ciudad en perfil → no coincide.
+ */
+export function teamIsInSameCity(user: User, team: Team): boolean {
+  if (user.cityId && team.cityId) {
+    return user.cityId === team.cityId
+  }
+
+  const userCityKey = normalizeLocationKey(user.city)
+  const teamCityKey = normalizeLocationKey(team.city)
+  if (!userCityKey || !teamCityKey) return false
+  if (userCityKey === teamCityKey) return true
+  if (teamCityKey.includes(userCityKey)) return true
+  if (userCityKey.includes(teamCityKey)) return true
+  return false
+}
+
+/**
  * Geo: sin datos de ubicación en perfil → no se filtra.
  * Con región en perfil → misma región (vía ciudad) o misma ciudad explícita.
  * Sin región pero con ciudad → misma ciudad (id o texto normalizado).
