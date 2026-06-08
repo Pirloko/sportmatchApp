@@ -1,7 +1,7 @@
 import { Ionicons } from '@expo/vector-icons'
 import * as ImagePicker from 'expo-image-picker'
 import { Link, router } from 'expo-router'
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   ActivityIndicator,
   Alert,
@@ -18,10 +18,17 @@ import { SafeAreaView } from 'react-native-safe-area-context'
 import { takeAndroidPendingImageAsset } from '../lib/android-image-picker-pending'
 import { levelLabel } from '../lib/format-match'
 import { useApp } from '../lib/app-provider'
+import { captureAndShareProfileCard } from '../lib/share-profile-instagram'
 import { useScreenTheme } from '../lib/theme-ui'
-import { isSupabaseConfigured } from '../lib/supabase/client'
+import { getSupabase, isSupabaseConfigured } from '../lib/supabase/client'
+import { fetchPlayerMvpWinsCount } from '../lib/supabase/mvp-queries'
 import { DEFAULT_AVATAR } from '../lib/supabase/mappers'
+import {
+  isPlaceholderAvatarUrl,
+  resolveTeamLogoDisplayUrl,
+} from '../lib/supabase/team-logos'
 import type { Level } from '../lib/types'
+import { ProfileShareCard, type ProfileShareCardData } from './profile-share-card'
 
 const DAY_ORDER = [
   'lunes',
@@ -44,6 +51,27 @@ function formatDayLabel(day: string): string {
     domingo: 'Dom',
   }
   return map[day.toLowerCase()] ?? day
+}
+
+function buildShareTeamRoleLine(
+  team: {
+    captainId: string
+    viceCaptainId?: string | null
+    members: { id: string; position: string }[]
+  },
+  userId: string,
+  fallbackPosition: string
+): string {
+  const parts: string[] = []
+  if (team.captainId === userId) parts.push('Capitán')
+  else if (team.viceCaptainId === userId) parts.push('Vicecapitán')
+
+  const member = team.members.find((m) => m.id === userId)
+  const pos = member?.position ?? fallbackPosition
+  const posLabel = positionLabel(pos)
+  if (posLabel) parts.push(posLabel)
+
+  return parts.length > 0 ? parts.join(' · ') : 'Jugador'
 }
 
 function positionLabel(p: string): string {
@@ -195,6 +223,9 @@ export function ProfileScreen() {
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [photoWorking, setPhotoWorking] = useState(false)
   const [deleteBusy, setDeleteBusy] = useState(false)
+  const [mvpWins, setMvpWins] = useState(0)
+  const [sharingProfile, setSharingProfile] = useState(false)
+  const shareCardRef = useRef<View>(null)
 
   const ui = useMemo(
     () => ({
@@ -224,6 +255,7 @@ export function ProfileScreen() {
         playerWins: 0,
         playerDraws: 0,
         playerLosses: 0,
+        mvpWins: 0,
         equipos: 0,
         organizedCompleted: 0,
         organizerWins: 0,
@@ -239,6 +271,7 @@ export function ProfileScreen() {
       playerWins: currentUser.statsPlayerWins ?? 0,
       playerDraws: currentUser.statsPlayerDraws ?? 0,
       playerLosses: currentUser.statsPlayerLosses ?? 0,
+      mvpWins,
       equipos: getUserTeams().length,
       organizedCompleted,
       organizerWins: currentUser.statsOrganizerWins ?? 0,
@@ -246,7 +279,62 @@ export function ProfileScreen() {
       red: currentUser.modRedCards ?? 0,
       orgTier: organizerProgress(organizedCompleted),
     }
-  }, [currentUser, matchOpportunities, getUserTeams])
+  }, [currentUser, matchOpportunities, getUserTeams, mvpWins])
+
+  useEffect(() => {
+    if (!currentUser?.id || !isSupabaseConfigured()) {
+      setMvpWins(0)
+      return
+    }
+    void fetchPlayerMvpWinsCount(getSupabase(), currentUser.id).then(setMvpWins)
+  }, [currentUser?.id])
+
+  const shareCardData = useMemo((): ProfileShareCardData | null => {
+    if (!currentUser) return null
+    const supabase = isSupabaseConfigured() ? getSupabase() : null
+    const teams = getUserTeams().map((t) => {
+      const fromDb = t.logo?.trim() || null
+      const resolved =
+        supabase && (!fromDb || isPlaceholderAvatarUrl(fromDb))
+          ? resolveTeamLogoDisplayUrl(supabase, t.id, fromDb)
+          : fromDb
+      return {
+        id: t.id,
+        name: t.name,
+        logoUri: resolved?.trim() || null,
+        roleLine: buildShareTeamRoleLine(
+          t,
+          currentUser.id,
+          currentUser.position
+        ),
+      }
+    })
+    return {
+      name: currentUser.name,
+      photoUri: currentUser.photo || DEFAULT_AVATAR,
+      playerWins: profileStats.playerWins,
+      playerDraws: profileStats.playerDraws,
+      playerLosses: profileStats.playerLosses,
+      mvpWins: profileStats.mvpWins,
+      yellowCards: profileStats.yellow,
+      redCards: profileStats.red,
+      teams,
+    }
+  }, [currentUser, profileStats, getUserTeams])
+
+  const handleShareProfile = useCallback(async () => {
+    if (!shareCardData || sharingProfile) return
+    setSharingProfile(true)
+    try {
+      await new Promise((resolve) => setTimeout(resolve, 500))
+      const res = await captureAndShareProfileCard(shareCardRef)
+      if (!res.ok) {
+        Alert.alert('No se pudo compartir', res.error)
+      }
+    } finally {
+      setSharingProfile(false)
+    }
+  }, [shareCardData, sharingProfile])
 
   const sortedAvailability = useMemo(() => {
     const raw = currentUser?.availability ?? []
@@ -578,6 +666,12 @@ export function ProfileScreen() {
                       hint: 'Como jugador (D)',
                     },
                     {
+                      icon: 'ribbon' as const,
+                      value: profileStats.mvpWins,
+                      label: 'MVP',
+                      hint: 'Partidos como MVP',
+                    },
+                    {
                       icon: 'people' as const,
                       value: profileStats.equipos,
                       label: 'Equipos',
@@ -586,7 +680,9 @@ export function ProfileScreen() {
                   ] as const
                 ).map((cell) => {
                   const iconColor =
-                    cell.icon === 'trophy' || cell.icon === 'people'
+                    cell.icon === 'trophy' ||
+                    cell.icon === 'people' ||
+                    cell.icon === 'ribbon'
                       ? ui.primaryAccent
                       : cell.icon === 'remove-outline'
                         ? ui.accentOnSurface
@@ -622,6 +718,34 @@ export function ProfileScreen() {
                   )
                 })}
               </View>
+
+              <Pressable
+                style={[
+                  styles.shareBtn,
+                  {
+                    backgroundColor: theme.isDark
+                      ? 'rgba(34, 197, 94, 0.12)'
+                      : 'rgba(15, 69, 57, 0.08)',
+                    borderColor: theme.isDark
+                      ? 'rgba(74, 222, 128, 0.35)'
+                      : 'rgba(15, 69, 57, 0.25)',
+                  },
+                  sharingProfile && styles.shareBtnDisabled,
+                ]}
+                disabled={sharingProfile || !shareCardData}
+                onPress={() => void handleShareProfile()}
+              >
+                {sharingProfile ? (
+                  <ActivityIndicator color={theme.primary} />
+                ) : (
+                  <>
+                    <Ionicons name="share-outline" size={22} color={theme.primary} />
+                    <Text style={[styles.shareBtnText, { color: theme.primary }]}>
+                      Compartir perfil
+                    </Text>
+                  </>
+                )}
+              </Pressable>
 
               <View style={styles.sectionBlock}>
                 <View style={styles.sectionTitleRow}>
@@ -918,6 +1042,12 @@ export function ProfileScreen() {
           SportMatch v1.0.0
         </Text>
       </ScrollView>
+
+      {shareCardData ? (
+        <View style={styles.shareCardHost} pointerEvents="none">
+          <ProfileShareCard ref={shareCardRef} data={shareCardData} />
+        </View>
+      ) : null}
 
       <Modal
         visible={settingsOpen}
@@ -1299,6 +1429,28 @@ function createStyles(theme: ReturnType<typeof useScreenTheme>) {
   statNum: { fontSize: 20, fontWeight: '800', marginTop: 4 },
   statLabel: { fontSize: 11, fontWeight: '700', marginTop: 2 },
   statHint: { fontSize: 10, marginTop: 2, textAlign: 'center' },
+  shareBtn: {
+    marginTop: 14,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 10,
+    paddingVertical: 14,
+    borderRadius: 14,
+    borderWidth: 1,
+  },
+  shareBtnDisabled: { opacity: 0.6 },
+  shareBtnText: {
+    fontSize: 15,
+    fontWeight: '700',
+  },
+  shareCardHost: {
+    position: 'absolute',
+    left: -5000,
+    top: 0,
+    width: 360,
+    height: 640,
+  },
   sectionBlock: { marginTop: 20, width: '100%' },
   sectionTitleRow: {
     flexDirection: 'row',

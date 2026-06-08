@@ -234,13 +234,14 @@ type AppContextType = {
     opportunityId: string,
     reason: string
   ) => Promise<{ ok: true } | { ok: false; error: string }>
-  /** Participante u organizador: una calificación por usuario (ventana 48 h). */
+  /** Participante confirmado u organizador: una reseña unificada por usuario y partido. */
   submitMatchRating: (
     opportunityId: string,
     payload: {
-      organizerRating: number | null
+      venueRating: number
       matchRating: number
       levelRating: number
+      mvpUserId: string
       comment?: string
     }
   ) => Promise<{ ok: true } | { ok: false; error: string }>
@@ -1279,26 +1280,35 @@ export function AppProvider({ children }: { children: ReactNode }) {
     async (
       opportunityId: string,
       payload: {
-        organizerRating: number | null
+        venueRating: number
         matchRating: number
         levelRating: number
+        mvpUserId: string
         comment?: string
       }
     ): Promise<{ ok: true } | { ok: false; error: string }> => {
       if (!currentUser || !supabase) {
         return { ok: false, error: 'Sesión no disponible.' }
       }
+      if (payload.mvpUserId === currentUser.id) {
+        return { ok: false, error: 'No puedes elegirte a ti mismo como MVP.' }
+      }
       const { error } = await supabase.from('match_opportunity_ratings').insert({
         opportunity_id: opportunityId,
         rater_id: currentUser.id,
-        organizer_rating: payload.organizerRating,
+        venue_rating: payload.venueRating,
         match_rating: payload.matchRating,
         level_rating: payload.levelRating,
+        mvp_user_id: payload.mvpUserId,
         comment: payload.comment?.trim() || null,
       })
 
       if (error) {
-        return { ok: false, error: error.message }
+        const msg =
+          error.code === '23505'
+            ? 'Ya enviaste tu reseña para este partido.'
+            : error.message
+        return { ok: false, error: msg }
       }
       return { ok: true }
     },

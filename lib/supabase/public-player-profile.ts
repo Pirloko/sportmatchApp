@@ -16,6 +16,7 @@ export type PublicPlayerProfile = {
   statsPlayerLosses: number
   statsOrganizedCompleted: number
   statsOrganizerWins: number
+  statsMvpWins: number
   modYellowCards: number
   modRedCards: number
 }
@@ -33,6 +34,7 @@ type RpcRow = {
   stats_player_losses: number
   stats_organized_completed: number
   stats_organizer_wins: number
+  stats_mvp_wins: number
   mod_yellow_cards: number
   mod_red_cards: number
 }
@@ -51,6 +53,7 @@ function mapRow(row: RpcRow): PublicPlayerProfile {
     statsPlayerLosses: row.stats_player_losses ?? 0,
     statsOrganizedCompleted: row.stats_organized_completed ?? 0,
     statsOrganizerWins: row.stats_organizer_wins ?? 0,
+    statsMvpWins: row.stats_mvp_wins ?? 0,
     modYellowCards: row.mod_yellow_cards ?? 0,
     modRedCards: row.mod_red_cards ?? 0,
   }

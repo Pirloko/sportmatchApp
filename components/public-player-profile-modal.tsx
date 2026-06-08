@@ -215,6 +215,9 @@ export function PublicPlayerProfileModal({
                 <StatCell label="Empates" value={profile.statsPlayerDraws} theme={theme} tone="draw" />
                 <StatCell label="Derrotas" value={profile.statsPlayerLosses} theme={theme} tone="loss" />
               </View>
+              <View style={[styles.statRow, { marginTop: 8 }]}>
+                <StatCell label="MVP" value={profile.statsMvpWins} theme={theme} tone="mvp" />
+              </View>
             </ProfileSection>
 
             {availability.length > 0 ? (
@@ -459,14 +462,18 @@ function StatCell({
   label: string
   value: number
   theme: ReturnType<typeof useScreenTheme>
-  tone: 'win' | 'draw' | 'loss'
+  tone: 'win' | 'draw' | 'loss' | 'mvp'
 }) {
   const bg =
     tone === 'win'
       ? theme.statWinBg
       : tone === 'draw'
         ? theme.statDrawBg
-        : theme.statLossBg
+        : tone === 'mvp'
+          ? theme.isDark
+            ? 'rgba(252, 211, 77, 0.16)'
+            : '#FEF9C3'
+          : theme.statLossBg
   return (
     <View style={[styles.statCell, { backgroundColor: bg, borderColor: theme.border }]}>
       <Text style={[styles.statValue, { color: theme.text }]}>{value}</Text>

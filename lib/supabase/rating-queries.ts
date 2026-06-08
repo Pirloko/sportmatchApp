@@ -4,9 +4,12 @@ export type MatchOpportunityRatingRow = {
   id: string
   opportunity_id: string
   rater_id: string
-  organizer_rating: number | null
+  /** Legacy: reseñas anteriores a la unificación. */
+  organizer_rating?: number | null
+  venue_rating: number | null
   match_rating: number
   level_rating: number
+  mvp_user_id: string | null
   comment: string | null
   created_at: string
 }
@@ -14,29 +17,35 @@ export type MatchOpportunityRatingRow = {
 export type RatingSummary = {
   opportunityId: string
   count: number
-  avgOrganizer: number | null
+  avgVenue: number | null
   avgMatch: number | null
   avgLevel: number | null
   avgOverall: number | null
+  mvpTally: { userId: string; votes: number }[]
 }
 
-export async function fetchMyRatingForOpportunity(
-  supabase: SupabaseClient,
-  opportunityId: string,
-  userId: string
-): Promise<MatchOpportunityRatingRow | null> {
-  const { data, error } = await supabase
-    .from('match_opportunity_ratings')
-    .select('*')
-    .eq('opportunity_id', opportunityId)
-    .eq('rater_id', userId)
-    .maybeSingle()
-
-  if (error || !data) return null
-  return data as MatchOpportunityRatingRow
+export type SubmitMatchReviewPayload = {
+  venueRating: number
+  matchRating: number
+  levelRating: number
+  mvpUserId: string
+  comment?: string
 }
 
-/** Ventana de 48 h desde finalized_at (solo UI). */
+export type MatchDetailRatingsBundle = {
+  ratingRows: Array<{
+    opportunity_id: string
+    venue_rating: number | null
+    match_rating: number
+    level_rating: number
+    mvp_user_id: string | null
+    organizer_rating?: number | null
+  }>
+  comments: Array<{ comment: string; created_at: string }>
+  myRating: MatchOpportunityRatingRow | null
+}
+
+/** Ventana de 48 h desde finalized_at — solo chat post-partido. */
 export function getRatingDeadline(finalizedAt: Date): Date {
   return new Date(finalizedAt.getTime() + 48 * 60 * 60 * 1000)
 }
@@ -50,7 +59,7 @@ export function isRatingWindowOpen(finalizedAt: Date | undefined): boolean {
  * ¿Se pueden enviar mensajes en el chat del partido?
  * - Partidos no finalizados: sí.
  * - Cancelados: no.
- * - Finalizados: solo durante las mismas 48 h posteriores a `finalizedAt` que las reseñas.
+ * - Finalizados: solo durante 48 h posteriores a `finalizedAt`.
  */
 export function isMatchChatMessagingOpen(opp: {
   status: string
@@ -67,6 +76,25 @@ function round1(n: number): number {
   return Math.round(n * 10) / 10
 }
 
+function venueValue(row: MatchOpportunityRatingRow): number | null {
+  if (typeof row.venue_rating === 'number') return row.venue_rating
+  if (typeof row.organizer_rating === 'number') return row.organizer_rating
+  return null
+}
+
+export function tallyMvpVotes(
+  mvpUserIds: (string | null | undefined)[]
+): { userId: string; votes: number }[] {
+  const counts = new Map<string, number>()
+  for (const id of mvpUserIds) {
+    if (!id) continue
+    counts.set(id, (counts.get(id) ?? 0) + 1)
+  }
+  return [...counts.entries()]
+    .map(([userId, votes]) => ({ userId, votes }))
+    .sort((a, b) => b.votes - a.votes)
+}
+
 function buildSummary(
   opportunityId: string,
   rows: MatchOpportunityRatingRow[]
@@ -76,23 +104,25 @@ function buildSummary(
     return {
       opportunityId,
       count: 0,
-      avgOrganizer: null,
+      avgVenue: null,
       avgMatch: null,
       avgLevel: null,
       avgOverall: null,
+      mvpTally: [],
     }
   }
 
-  const organizerVals = rows
-    .map((r) => r.organizer_rating)
+  const venueVals = rows
+    .map(venueValue)
     .filter((v): v is number => typeof v === 'number')
   const matchVals = rows.map((r) => r.match_rating)
   const levelVals = rows.map((r) => r.level_rating)
-  const overallVals = rows.flatMap((r) =>
-    r.organizer_rating == null
-      ? [r.match_rating, r.level_rating]
-      : [r.organizer_rating, r.match_rating, r.level_rating]
-  )
+  const overallVals = rows.flatMap((r) => {
+    const venue = venueValue(r)
+    return venue != null
+      ? [venue, r.match_rating, r.level_rating]
+      : [r.match_rating, r.level_rating]
+  })
 
   const avg = (vals: number[]) =>
     vals.length ? round1(vals.reduce((a, b) => a + b, 0) / vals.length) : null
@@ -100,11 +130,28 @@ function buildSummary(
   return {
     opportunityId,
     count,
-    avgOrganizer: avg(organizerVals),
+    avgVenue: avg(venueVals),
     avgMatch: avg(matchVals),
     avgLevel: avg(levelVals),
     avgOverall: avg(overallVals),
+    mvpTally: tallyMvpVotes(rows.map((r) => r.mvp_user_id)),
   }
+}
+
+export async function fetchMyRatingForOpportunity(
+  supabase: SupabaseClient,
+  opportunityId: string,
+  userId: string
+): Promise<MatchOpportunityRatingRow | null> {
+  const { data, error } = await supabase
+    .from('match_opportunity_ratings')
+    .select('*')
+    .eq('opportunity_id', opportunityId)
+    .eq('rater_id', userId)
+    .maybeSingle()
+
+  if (error || !data) return null
+  return data as MatchOpportunityRatingRow
 }
 
 export async function fetchRatingSummaryForOpportunity(
@@ -167,4 +214,29 @@ export async function fetchRecentRatingCommentsForOpportunity(
       comment: r.comment as string,
       createdAt: new Date(r.created_at as string),
     }))
+}
+
+export async function fetchMatchDetailRatingsBundle(
+  supabase: SupabaseClient,
+  opportunityId: string
+): Promise<MatchDetailRatingsBundle> {
+  const { data, error } = await supabase.rpc('match_detail_ratings_bundle', {
+    p_opportunity_id: opportunityId,
+  })
+
+  if (error || !data || typeof data !== 'object') {
+    return { ratingRows: [], comments: [], myRating: null }
+  }
+
+  const bundle = data as {
+    rating_rows?: MatchDetailRatingsBundle['ratingRows']
+    comments?: MatchDetailRatingsBundle['comments']
+    my_rating?: MatchOpportunityRatingRow | null
+  }
+
+  return {
+    ratingRows: bundle.rating_rows ?? [],
+    comments: bundle.comments ?? [],
+    myRating: bundle.my_rating ?? null,
+  }
 }

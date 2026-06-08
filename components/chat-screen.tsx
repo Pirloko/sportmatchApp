@@ -627,9 +627,7 @@ export function ChatScreen() {
           <MatchCompletionPanel
             opportunity={opportunity}
             currentUserId={currentUser.id}
-            isConfirmedParticipant={participatingOpportunityIds.includes(
-              opportunity.id
-            )}
+            participants={participants}
             myRating={myRating}
             loadingRating={loadingRating}
             onReloadMyRating={() => void loadMyRating()}

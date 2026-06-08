@@ -57,6 +57,7 @@ export interface User {
   statsPlayerDraws?: number
   statsPlayerLosses?: number
   statsOrganizerWins?: number
+  statsMvpWins?: number
   /** Moderación: tarjetas por reportes. */
   modYellowCards?: number
   modRedCards?: number

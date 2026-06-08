@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react'
 import {
   ActivityIndicator,
   Alert,
+  Image,
   Pressable,
   StyleSheet,
   Text,
@@ -9,8 +10,15 @@ import {
   View,
 } from 'react-native'
 
-import { formatRelativeUntil } from '../lib/format-match'
 import type { MatchOpportunity, RivalResult } from '../lib/types'
+import {
+  filterMvpVoteCandidates,
+  userCanSubmitMatchReview,
+} from '../lib/match-review-eligibility'
+import type { OpportunityParticipantRow } from '../lib/supabase/message-queries'
+import { type MatchOpportunityRatingRow } from '../lib/supabase/rating-queries'
+import { useScreenTheme } from '../lib/theme-ui'
+
 function isTeamPickType(type: MatchOpportunity['type']): boolean {
   return (
     type === 'team_pick' ||
@@ -18,13 +26,6 @@ function isTeamPickType(type: MatchOpportunity['type']): boolean {
     type === 'team_pick_private'
   )
 }
-
-import {
-  getRatingDeadline,
-  isRatingWindowOpen,
-  type MatchOpportunityRatingRow,
-} from '../lib/supabase/rating-queries'
-import { useScreenTheme } from '../lib/theme-ui'
 
 const SUSPEND_PRESET_REASONS = [
   'Mal tiempo o lluvia',
@@ -69,7 +70,7 @@ function StarRow({
 type Props = {
   opportunity: MatchOpportunity
   currentUserId: string
-  isConfirmedParticipant: boolean
+  participants: OpportunityParticipantRow[]
   myRating: MatchOpportunityRatingRow | null
   loadingRating: boolean
   onReloadMyRating: () => void
@@ -87,9 +88,10 @@ type Props = {
   submitMatchRating: (
     opportunityId: string,
     payload: {
-      organizerRating: number | null
+      venueRating: number
       matchRating: number
       levelRating: number
+      mvpUserId: string
       comment?: string
     }
   ) => Promise<{ ok: true } | { ok: false; error: string }>
@@ -98,7 +100,7 @@ type Props = {
 export function MatchCompletionPanel({
   opportunity,
   currentUserId,
-  isConfirmedParticipant,
+  participants,
   myRating,
   loadingRating,
   onReloadMyRating,
@@ -110,20 +112,15 @@ export function MatchCompletionPanel({
   const styles = useMemo(() => createCompletionStyles(theme), [theme])
   const isCreator = opportunity.creatorId === currentUserId
   const completed = opportunity.status === 'completed'
-  const needsResolveAfterMidnight = (() => {
-    if (!isCreator) return false
-    if (completed || opportunity.status === 'cancelled') return false
-    const midnight = new Date()
-    midnight.setHours(0, 0, 0, 0)
-    return opportunity.dateTime.getTime() < midnight.getTime()
-  })()
   const finalizedAt = opportunity.finalizedAt
-  const windowOpen =
-    completed && finalizedAt && isRatingWindowOpen(finalizedAt)
+  const mvpCandidates = useMemo(
+    () => filterMvpVoteCandidates(participants, currentUserId),
+    [participants, currentUserId]
+  )
   const canRate =
     completed &&
-    windowOpen &&
-    (isCreator || isConfirmedParticipant) &&
+    finalizedAt != null &&
+    userCanSubmitMatchReview(currentUserId, participants) &&
     !myRating &&
     !loadingRating
 
@@ -138,10 +135,19 @@ export function MatchCompletionPanel({
   )
   const [suspendOtherText, setSuspendOtherText] = useState('')
 
-  const [orgStars, setOrgStars] = useState(0)
+  const [venueStars, setVenueStars] = useState(0)
   const [matchStars, setMatchStars] = useState(0)
   const [levelStars, setLevelStars] = useState(0)
+  const [mvpUserId, setMvpUserId] = useState<string | null>(null)
   const [comment, setComment] = useState('')
+
+  const needsResolveAfterMidnight = (() => {
+    if (!isCreator) return false
+    if (completed || opportunity.status === 'cancelled') return false
+    const midnight = new Date()
+    midnight.setHours(0, 0, 0, 0)
+    return opportunity.dateTime.getTime() < midnight.getTime()
+  })()
 
   const showFinalize =
     isCreator && !completed && opportunity.status !== 'cancelled'
@@ -214,6 +220,9 @@ export function MatchCompletionPanel({
   }
 
   const handleFinalize = async () => {
+    const successMsg =
+      'Partido finalizado. Los jugadores pueden dejar su reseña cuando quieran.'
+
     if (opportunity.type === 'rival') {
       if (!rivalPick) return
       setFinalizing(true)
@@ -226,10 +235,7 @@ export function MatchCompletionPanel({
           Alert.alert('No se pudo finalizar', res.error)
           return
         }
-        Alert.alert(
-          'Listo',
-          'Partido finalizado. Los jugadores pueden calificar en las próximas 48 h.'
-        )
+        Alert.alert('Listo', successMsg)
       } finally {
         setFinalizing(false)
       }
@@ -247,10 +253,7 @@ export function MatchCompletionPanel({
           Alert.alert('No se pudo finalizar', res.error)
           return
         }
-        Alert.alert(
-          'Listo',
-          'Partido finalizado. Los jugadores pueden calificar en las próximas 48 h.'
-        )
+        Alert.alert('Listo', successMsg)
       } finally {
         setFinalizing(false)
       }
@@ -265,37 +268,45 @@ export function MatchCompletionPanel({
         Alert.alert('No se pudo finalizar', res.error)
         return
       }
-      Alert.alert(
-        'Listo',
-        'Partido finalizado. Los jugadores pueden calificar en las próximas 48 h.'
-      )
+      Alert.alert('Listo', successMsg)
     } finally {
       setFinalizing(false)
     }
   }
 
   const handleSubmitRating = async () => {
-    if (!matchStars || !levelStars) return
-    if (!isCreator && !orgStars) return
+    if (!venueStars || !matchStars || !levelStars || !mvpUserId) return
     setSubmitting(true)
     try {
       const res = await submitMatchRating(opportunity.id, {
-        organizerRating: isCreator ? null : orgStars,
+        venueRating: venueStars,
         matchRating: matchStars,
         levelRating: levelStars,
+        mvpUserId,
         comment: comment.trim() || undefined,
       })
       if (!res.ok) {
         Alert.alert('Error', res.error)
         return
       }
-      Alert.alert('Gracias', '¡Gracias por tu calificación!')
+      Alert.alert('Gracias', '¡Gracias por tu reseña!')
       onReloadMyRating()
       setComment('')
+      setVenueStars(0)
+      setMatchStars(0)
+      setLevelStars(0)
+      setMvpUserId(null)
     } finally {
       setSubmitting(false)
     }
   }
+
+  const canSubmitReview =
+    venueStars > 0 &&
+    matchStars > 0 &&
+    levelStars > 0 &&
+    mvpUserId != null &&
+    !submitting
 
   if (!showFinalize && !completed) return null
 
@@ -317,8 +328,8 @@ export function MatchCompletionPanel({
             {needsResolveAfterMidnight ? 'Resolver partido' : 'Finalizar partido'}
           </Text>
           <Text style={styles.hint}>
-            Al cerrar, se registrará el resultado y se abrirá la ventana de 48 h
-            para que los jugadores califiquen.
+            Al cerrar, se registrará el resultado y los jugadores podrán dejar
+            su reseña.
           </Text>
           {opportunity.type === 'rival' && (
             <View style={styles.radioBlock}>
@@ -506,51 +517,77 @@ export function MatchCompletionPanel({
         <View style={styles.section}>
           <Text style={styles.doneBadge}>Partido finalizado</Text>
           {outcomeLine()}
-          {finalizedAt && windowOpen && (
-            <Text style={styles.deadlineHint}>
-              Plazo de calificación: termina{' '}
-              {formatRelativeUntil(getRatingDeadline(finalizedAt))}
-            </Text>
-          )}
         </View>
       )}
 
       {loadingRating && (
-        <Text style={styles.mutedSmall}>Cargando tu calificación…</Text>
+        <Text style={styles.mutedSmall}>Cargando tu reseña…</Text>
       )}
 
       {myRating && (
         <Text style={styles.thanks}>
-          Ya enviaste tu calificación para este partido. ¡Gracias!
+          Ya enviaste tu reseña para este partido. ¡Gracias!
         </Text>
       )}
 
       {canRate && (
         <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Tu calificación (una sola vez)</Text>
-          {!isCreator && (
-            <StarRow
-              label="Gestión del organizador"
-              value={orgStars}
-              onChange={setOrgStars}
-              disabled={submitting}
-              styles={styles}
-            />
-          )}
+          <Text style={styles.sectionTitle}>Tu reseña (una sola vez)</Text>
           <StarRow
-            label="El partido en conjunto (ambiente, fluidez)"
+            label="Recinto deportivo"
+            value={venueStars}
+            onChange={setVenueStars}
+            disabled={submitting}
+            styles={styles}
+          />
+          <StarRow
+            label="Ambiente del partido"
             value={matchStars}
             onChange={setMatchStars}
             disabled={submitting}
             styles={styles}
           />
           <StarRow
-            label="Nivel del partido vs lo anunciado"
+            label="Nivel del partido"
             value={levelStars}
             onChange={setLevelStars}
             disabled={submitting}
             styles={styles}
           />
+          <Text style={styles.inputLabel}>MVP del partido</Text>
+          {mvpCandidates.length === 0 ? (
+            <Text style={styles.mutedSmall}>
+              Cargando participantes para elegir MVP…
+            </Text>
+          ) : (
+            <View style={styles.mvpList}>
+              {mvpCandidates.map((p) => {
+                const selected = mvpUserId === p.id
+                return (
+                  <Pressable
+                    key={p.id}
+                    disabled={submitting}
+                    style={[
+                      styles.mvpRow,
+                      selected && styles.mvpRowSelected,
+                    ]}
+                    onPress={() => setMvpUserId(p.id)}
+                  >
+                    <Image source={{ uri: p.photo }} style={styles.mvpAvatar} />
+                    <Text style={styles.mvpName} numberOfLines={1}>
+                      {p.name}
+                    </Text>
+                    <View
+                      style={[
+                        styles.radioDot,
+                        selected && styles.radioDotOn,
+                      ]}
+                    />
+                  </Pressable>
+                )
+              })}
+            </View>
+          )}
           <Text style={styles.inputLabel}>Comentario (opcional)</Text>
           <TextInput
             style={styles.textArea}
@@ -565,39 +602,19 @@ export function MatchCompletionPanel({
           <Pressable
             style={[
               styles.primaryBtn,
-              (submitting ||
-                !matchStars ||
-                !levelStars ||
-                (!isCreator && !orgStars)) &&
-                styles.btnDisabled,
+              !canSubmitReview && styles.btnDisabled,
             ]}
-            disabled={
-              submitting ||
-              !matchStars ||
-              !levelStars ||
-              (!isCreator && !orgStars)
-            }
+            disabled={!canSubmitReview}
             onPress={() => void handleSubmitRating()}
           >
             {submitting ? (
               <ActivityIndicator color={theme.primaryBtnText} />
             ) : (
-              <Text style={styles.primaryBtnText}>Enviar calificación</Text>
+              <Text style={styles.primaryBtnText}>Enviar reseña</Text>
             )}
           </Pressable>
         </View>
       )}
-
-      {completed &&
-        finalizedAt &&
-        !windowOpen &&
-        !myRating &&
-        (isCreator || isConfirmedParticipant) &&
-        !loadingRating && (
-          <Text style={styles.mutedSmall}>
-            El plazo de 48 h para calificar ya cerró.
-          </Text>
-        )}
     </View>
   )
 }
@@ -732,7 +749,6 @@ function createCompletionStyles(theme: ReturnType<typeof useScreenTheme>) {
       textTransform: 'uppercase',
     },
     outcomeLine: { fontSize: 14, color: theme.textMuted, marginTop: 4 },
-    deadlineHint: { fontSize: 12, color: theme.textMuted },
     mutedSmall: { fontSize: 12, color: theme.textMuted },
     thanks: { fontSize: 14, color: theme.primary, fontWeight: '600' },
     starBlock: { gap: 6 },
@@ -753,5 +769,22 @@ function createCompletionStyles(theme: ReturnType<typeof useScreenTheme>) {
     starGlyph: { fontSize: 22, color: theme.textMuted },
     starGlyphOn: { color: theme.primary },
     inputLabel: { fontSize: 14, color: theme.text, marginTop: 4 },
+    mvpList: { gap: 6 },
+    mvpRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 10,
+      padding: 10,
+      borderRadius: 10,
+      borderWidth: 1,
+      borderColor: theme.border,
+      backgroundColor: theme.card,
+    },
+    mvpRowSelected: {
+      borderColor: theme.primary,
+      backgroundColor: theme.selectedTint,
+    },
+    mvpAvatar: { width: 36, height: 36, borderRadius: 18 },
+    mvpName: { flex: 1, fontSize: 14, color: theme.text },
   })
 }

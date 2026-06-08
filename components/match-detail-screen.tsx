@@ -29,9 +29,8 @@ import {
   type OpportunityParticipantRow,
 } from '../lib/supabase/message-queries'
 import {
-  fetchMyRatingForOpportunity,
+  fetchMatchDetailRatingsBundle,
   fetchRatingSummaryForOpportunity,
-  fetchRecentRatingCommentsForOpportunity,
   type MatchOpportunityRatingRow,
   type RatingSummary,
 } from '../lib/supabase/rating-queries'
@@ -199,40 +198,33 @@ export function MatchDetailScreen() {
     if (!id || !isSupabaseConfigured()) {
       setRatingSummary(null)
       setRecentComments([])
-      return
-    }
-    const supabase = getSupabase()
-    const [summary, comments] = await Promise.all([
-      fetchRatingSummaryForOpportunity(supabase, id),
-      fetchRecentRatingCommentsForOpportunity(supabase, id),
-    ])
-    setRatingSummary(summary)
-    setRecentComments(comments)
-  }, [id])
-
-  const loadMyRating = useCallback(async () => {
-    if (!id || !currentUser || !isSupabaseConfigured()) {
       setMyRating(null)
       return
     }
     setLoadingRating(true)
     try {
-      const row = await fetchMyRatingForOpportunity(
-        getSupabase(),
-        id,
-        currentUser.id
+      const supabase = getSupabase()
+      const [bundle, summary] = await Promise.all([
+        fetchMatchDetailRatingsBundle(supabase, id),
+        fetchRatingSummaryForOpportunity(supabase, id),
+      ])
+      setMyRating(bundle.myRating)
+      setRatingSummary(summary)
+      setRecentComments(
+        bundle.comments.map((c) => ({
+          comment: c.comment,
+          createdAt: new Date(c.created_at),
+        }))
       )
-      setMyRating(row)
     } finally {
       setLoadingRating(false)
     }
-  }, [id, currentUser])
+  }, [id])
 
   useEffect(() => {
     void loadParticipants()
-    void loadMyRating()
     void loadRatingsOverview()
-  }, [loadParticipants, loadMyRating, loadRatingsOverview])
+  }, [loadParticipants, loadRatingsOverview])
 
   const loadRivalEncounter = useCallback(async () => {
     if (!id || !opp || opp.type !== 'rival' || !isSupabaseConfigured()) {
@@ -329,6 +321,13 @@ export function MatchDetailScreen() {
   ])
 
   const isParticipant = participatingOpportunityIds.includes(opp?.id ?? '')
+
+  const topMvp = useMemo(() => {
+    const top = ratingSummary?.mvpTally[0]
+    if (!top) return null
+    const player = participants.find((p) => p.id === top.userId)
+    return { name: player?.name ?? 'Jugador', votes: top.votes }
+  }, [ratingSummary, participants])
 
   const canRivalPickSlot = useMemo(() => {
     if (!currentUser || !opp || opp.type !== 'rival') return false
@@ -824,7 +823,8 @@ export function MatchDetailScreen() {
             {[
               { label: 'Reseñas', value: String(ratingSummary?.count ?? 0) },
               { label: 'General', value: ratingSummary?.avgOverall != null ? `⭐ ${ratingSummary.avgOverall}` : '—' },
-              { label: 'Partido', value: ratingSummary?.avgMatch != null ? `⭐ ${ratingSummary.avgMatch}` : '—' },
+              { label: 'Recinto', value: ratingSummary?.avgVenue != null ? `⭐ ${ratingSummary.avgVenue}` : '—' },
+              { label: 'Ambiente', value: ratingSummary?.avgMatch != null ? `⭐ ${ratingSummary.avgMatch}` : '—' },
               { label: 'Nivel', value: ratingSummary?.avgLevel != null ? `⭐ ${ratingSummary.avgLevel}` : '—' },
             ].map((s) => (
               <View key={s.label} style={[styles.statBox, { backgroundColor: isDark ? 'rgba(255,255,255,0.05)' : '#F4F7F2', borderColor: tokens.borderDark }]}>
@@ -833,6 +833,11 @@ export function MatchDetailScreen() {
               </View>
             ))}
           </View>
+          {topMvp ? (
+            <Text style={[styles.mvpLine, { color: tokens.textPrimary }]}>
+              🏅 MVP: {topMvp.name} ({topMvp.votes} {topMvp.votes === 1 ? 'voto' : 'votos'})
+            </Text>
+          ) : null}
           {recentComments.length > 0 ? (
             <>
               <Text style={[styles.commentsTitle, { color: tokens.textMuted }]}>Comentarios</Text>
@@ -984,11 +989,10 @@ export function MatchDetailScreen() {
       <MatchCompletionPanel
         opportunity={opp}
         currentUserId={currentUser.id}
-        isConfirmedParticipant={isParticipant}
+        participants={participants}
         myRating={myRating}
         loadingRating={loadingRating}
         onReloadMyRating={() => {
-          void loadMyRating()
           void loadRatingsOverview()
         }}
         finalizeMatchOpportunity={finalizeMatchOpportunity}
@@ -1245,6 +1249,7 @@ const styles = StyleSheet.create({
     marginTop: 12,
     marginBottom: 4,
   },
+  mvpLine: { fontSize: 14, fontWeight: '600', marginTop: 8 },
   commentBubble: { borderRadius: 10, padding: 12, marginTop: 6 },
   commentText: { fontSize: 14, lineHeight: 20, fontStyle: 'italic' },
 })
