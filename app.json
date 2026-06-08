@@ -9,7 +9,7 @@
     "userInterfaceStyle": "light",
     "newArchEnabled": false,
     "splash": {
-      "image": "./assets/logohome.webp",
+      "image": "./assets/logohome.png",
       "resizeMode": "contain",
       "backgroundColor": "#000000"
     },
