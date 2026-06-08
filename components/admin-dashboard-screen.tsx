@@ -14,6 +14,7 @@ import { router } from 'expo-router'
 
 import { useApp } from '../lib/app-provider'
 import { useScreenTheme } from '../lib/theme-ui'
+import { BallLoadingIndicator } from './ball-loading-indicator'
 import {
   createVenueUserViaBackend,
   isAdminCreateVenueConfigured,
@@ -265,7 +266,7 @@ export function AdminDashboardScreen() {
           </View>
 
           {loading || !metrics ? (
-            <Text style={styles.muted}>Cargando métricas…</Text>
+            <BallLoadingIndicator size="sm" message="Cargando métricas…" />
           ) : (
             <View style={styles.statsGrid}>
               <Stat label="Reservas" value={metrics.totals.reservations} />

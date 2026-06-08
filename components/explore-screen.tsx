@@ -16,12 +16,15 @@ import { SafeAreaView } from 'react-native-safe-area-context'
 import { HomeMatchCard } from './home-match-card'
 import { JoinPlayersModal } from './join-players-modal'
 import { JoinRevueltaModal } from './join-revuelta-modal'
+import { MatchJoinSuccessModal } from './match-join-success-modal'
 import { JoinTeamPickModal } from './join-team-pick-modal'
 import { RivalTeamPickerModal } from './rival-team-picker-modal'
 import { alertJoinResult } from '../lib/alert-join-result'
+import { matchInviteSharePayload } from '../lib/match-invite-share'
 import { startOfToday } from '../lib/format-match'
 import { useApp } from '../lib/app-provider'
 import { useScreenTheme } from '../lib/theme-ui'
+import { useMatchCourtCosts } from '../lib/use-match-court-costs'
 import type { Level, MatchOpportunity, MatchType, SportsVenue } from '../lib/types'
 import { usePublicVenues } from '../src/features/explore/hooks/use-public-venues'
 
@@ -62,6 +65,9 @@ export function ExploreScreen() {
     null
   )
   const [rivalPickOppId, setRivalPickOppId] = useState<string | null>(null)
+  const [joinSuccessVisible, setJoinSuccessVisible] = useState(false)
+  const [joinSuccessTitle, setJoinSuccessTitle] = useState<string | undefined>()
+  const [joinedAsGoalkeeper, setJoinedAsGoalkeeper] = useState(false)
   const [searchQuery, setSearchQuery] = useState('')
   const [showFilters, setShowFilters] = useState(false)
   const [filters, setFilters] = useState<{
@@ -118,6 +124,8 @@ export function ExploreScreen() {
       return true
     })
   }, [visibleMatches, searchQuery, filters])
+
+  const courtCostsByMatchId = useMatchCourtCosts(filteredMatches)
 
   const toggleType = (type: MatchType) => {
     setFilters((f) =>
@@ -203,10 +211,21 @@ export function ExploreScreen() {
     setJoiningId(opportunityId)
     try {
       const r = await joinMatchOpportunity(opportunityId)
-      alertJoinResult(r)
+      if (r.ok) {
+        const m = filteredMatches.find((x) => x.id === opportunityId)
+        if (m) showJoinSuccess(m)
+      } else {
+        alertJoinResult(r)
+      }
     } finally {
       setJoiningId(null)
     }
+  }
+
+  const showJoinSuccess = (match: MatchOpportunity, asGk?: boolean) => {
+    setJoinSuccessTitle(match.title)
+    setJoinedAsGoalkeeper(asGk === true)
+    setJoinSuccessVisible(true)
   }
 
   const openVenue = (v: SportsVenue) => {
@@ -408,16 +427,23 @@ export function ExploreScreen() {
                 <HomeMatchCard
                   key={match.id}
                   match={match}
+                  courtCost={courtCostsByMatchId.get(match.id) ?? null}
                   isOwn={currentUser.id === match.creatorId}
                   isJoined={participatingOpportunityIds.includes(match.id)}
                   joining={joiningId === match.id}
                   onViewDetails={() => router.push(`/partidos/${match.id}`)}
                   currentUserId={currentUser.id}
-                  onShareRevuelta={() =>
-                    void Share.share({
-                      message: `¡Únete a la revuelta «${match.title}» en SportMatch!`,
+                  onShareRevuelta={() => {
+                    const joined = match.playersJoined ?? 0
+                    const slotsLeft =
+                      match.playersNeeded != null
+                        ? Math.max(0, match.playersNeeded - joined)
+                        : undefined
+                    const { message, url, title } = matchInviteSharePayload(match, {
+                      slotsLeft,
                     })
-                  }
+                    void Share.share({ message, url, title })
+                  }}
                   onJoin={() =>
                     void handleJoin(
                       match.id,
@@ -450,10 +476,12 @@ export function ExploreScreen() {
         opportunity={revueltaJoinOpp}
         onJoin={async (isGk) => {
           if (!revueltaJoinOpp) return false
-          const r = await joinMatchOpportunity(revueltaJoinOpp.id, {
+          const match = revueltaJoinOpp
+          const r = await joinMatchOpportunity(match.id, {
             isGoalkeeper: isGk,
           })
-          alertJoinResult(r)
+          if (r.ok) showJoinSuccess(match, isGk)
+          else alertJoinResult(r)
           return r.ok
         }}
       />
@@ -464,12 +492,14 @@ export function ExploreScreen() {
         opportunity={teamPickJoinOpp}
         onJoin={async ({ team, role, joinCode }) => {
           if (!teamPickJoinOpp) return false
-          const r = await joinMatchOpportunity(teamPickJoinOpp.id, {
+          const match = teamPickJoinOpp
+          const r = await joinMatchOpportunity(match.id, {
             teamPickTeam: team,
             teamPickRole: role,
             teamPickJoinCode: joinCode,
           })
-          alertJoinResult(r)
+          if (r.ok) showJoinSuccess(match, role === 'gk')
+          else alertJoinResult(r)
           return r.ok
         }}
       />
@@ -480,12 +510,21 @@ export function ExploreScreen() {
         opportunity={playersJoinOpp}
         onJoin={async (isGk) => {
           if (!playersJoinOpp) return false
-          const r = await joinMatchOpportunity(playersJoinOpp.id, {
+          const match = playersJoinOpp
+          const r = await joinMatchOpportunity(match.id, {
             isGoalkeeper: isGk,
           })
-          alertJoinResult(r)
+          if (r.ok) showJoinSuccess(match, isGk)
+          else alertJoinResult(r)
           return r.ok
         }}
+      />
+
+      <MatchJoinSuccessModal
+        visible={joinSuccessVisible}
+        matchTitle={joinSuccessTitle}
+        joinedAsGoalkeeper={joinedAsGoalkeeper}
+        onClose={() => setJoinSuccessVisible(false)}
       />
 
       <RivalTeamPickerModal

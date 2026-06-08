@@ -17,9 +17,12 @@ import { SafeAreaView } from 'react-native-safe-area-context'
 import { HomeMatchCard } from './home-match-card'
 import { JoinPlayersModal } from './join-players-modal'
 import { JoinRevueltaModal } from './join-revuelta-modal'
+import { MatchJoinSuccessModal } from './match-join-success-modal'
 import { JoinTeamPickModal } from './join-team-pick-modal'
 import { RivalTeamPickerModal } from './rival-team-picker-modal'
+import { APP_LOGO } from '../lib/app-brand-assets'
 import { alertJoinResult } from '../lib/alert-join-result'
+import { matchInviteSharePayload } from '../lib/match-invite-share'
 import { startOfToday } from '../lib/format-match'
 import { useApp } from '../lib/app-provider'
 import { useUnreadNotificationsCount } from '../lib/hooks/use-unread-notifications'
@@ -27,6 +30,7 @@ import { useThemePreference } from '../lib/theme-context'
 import { getSupabase, isSupabaseConfigured } from '../lib/supabase/client'
 import { fetchGeoCities, type GeoCity } from '../lib/supabase/geo-queries'
 import { DEFAULT_AVATAR } from '../lib/supabase/mappers'
+import { useMatchCourtCosts } from '../lib/use-match-court-costs'
 import type { MatchOpportunity, MatchType } from '../lib/types'
 
 type FilterType = 'all' | MatchType
@@ -70,6 +74,9 @@ export function PlayerHomeScreen() {
     null
   )
   const [rivalPickOppId, setRivalPickOppId] = useState<string | null>(null)
+  const [joinSuccessVisible, setJoinSuccessVisible] = useState(false)
+  const [joinSuccessTitle, setJoinSuccessTitle] = useState<string | undefined>()
+  const [joinedAsGoalkeeper, setJoinedAsGoalkeeper] = useState(false)
   const [activeFilter, setActiveFilter] = useState<FilterType>('all')
   const [teamPrivateCode, setTeamPrivateCode] = useState('')
   const [selectedCity, setSelectedCity] = useState<string | null>(null)
@@ -185,6 +192,8 @@ export function PlayerHomeScreen() {
     )
   }, [filteredMatches, selectedCity])
 
+  const courtCostsByMatchId = useMatchCourtCosts(listMatches)
+
   const captainTeams = useMemo(() => {
     if (!currentUser) return []
     return getUserTeams().filter((t) => t.captainId === currentUser.id)
@@ -252,16 +261,31 @@ export function PlayerHomeScreen() {
     setJoiningId(opportunityId)
     try {
       const r = await joinMatchOpportunity(opportunityId)
-      alertJoinResult(r)
+      if (r.ok) {
+        const m = listMatches.find((x) => x.id === opportunityId)
+        if (m) showJoinSuccess(m)
+      } else {
+        alertJoinResult(r)
+      }
     } finally {
       setJoiningId(null)
     }
   }
 
+  const showJoinSuccess = (match: MatchOpportunity, asGk?: boolean) => {
+    setJoinSuccessTitle(match.title)
+    setJoinedAsGoalkeeper(asGk === true)
+    setJoinSuccessVisible(true)
+  }
+
   const shareRevuelta = (match: MatchOpportunity) => {
-    void Share.share({
-      message: `¡Únete a la revuelta «${match.title}» en SportMatch!`,
-    })
+    const joined = match.playersJoined ?? 0
+    const slotsLeft =
+      match.playersNeeded != null
+        ? Math.max(0, match.playersNeeded - joined)
+        : undefined
+    const { message, url, title } = matchInviteSharePayload(match, { slotsLeft })
+    void Share.share({ message, url, title })
   }
 
   const toggleTheme = () => {
@@ -313,7 +337,7 @@ export function PlayerHomeScreen() {
               ]}
             >
               <Image
-                source={require('../assets/sportmatch-logo.png')}
+                source={APP_LOGO}
                 style={styles.brandLogo}
                 resizeMode="contain"
                 accessibilityLabel="SportMatch"
@@ -502,6 +526,7 @@ export function PlayerHomeScreen() {
               <HomeMatchCard
                 key={match.id}
                 match={match}
+                courtCost={courtCostsByMatchId.get(match.id) ?? null}
                 isOwn={currentUser?.id === match.creatorId}
                 isJoined={participatingOpportunityIds.includes(match.id)}
                 joining={joiningId === match.id}
@@ -554,10 +579,12 @@ export function PlayerHomeScreen() {
         opportunity={revueltaJoinOpp}
         onJoin={async (isGk) => {
           if (!revueltaJoinOpp) return false
-          const r = await joinMatchOpportunity(revueltaJoinOpp.id, {
+          const match = revueltaJoinOpp
+          const r = await joinMatchOpportunity(match.id, {
             isGoalkeeper: isGk,
           })
-          alertJoinResult(r)
+          if (r.ok) showJoinSuccess(match, isGk)
+          else alertJoinResult(r)
           return r.ok
         }}
       />
@@ -572,12 +599,14 @@ export function PlayerHomeScreen() {
         initialJoinCode={teamPickInitialCode}
         onJoin={async ({ team, role, joinCode }) => {
           if (!teamPickJoinOpp) return false
-          const r = await joinMatchOpportunity(teamPickJoinOpp.id, {
+          const match = teamPickJoinOpp
+          const r = await joinMatchOpportunity(match.id, {
             teamPickTeam: team,
             teamPickRole: role,
             teamPickJoinCode: joinCode,
           })
-          alertJoinResult(r)
+          if (r.ok) showJoinSuccess(match, role === 'gk')
+          else alertJoinResult(r)
           return r.ok
         }}
       />
@@ -588,12 +617,21 @@ export function PlayerHomeScreen() {
         opportunity={playersJoinOpp}
         onJoin={async (isGk) => {
           if (!playersJoinOpp) return false
-          const r = await joinMatchOpportunity(playersJoinOpp.id, {
+          const match = playersJoinOpp
+          const r = await joinMatchOpportunity(match.id, {
             isGoalkeeper: isGk,
           })
-          alertJoinResult(r)
+          if (r.ok) showJoinSuccess(match, isGk)
+          else alertJoinResult(r)
           return r.ok
         }}
+      />
+
+      <MatchJoinSuccessModal
+        visible={joinSuccessVisible}
+        matchTitle={joinSuccessTitle}
+        joinedAsGoalkeeper={joinedAsGoalkeeper}
+        onClose={() => setJoinSuccessVisible(false)}
       />
 
       <RivalTeamPickerModal

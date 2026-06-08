@@ -15,8 +15,10 @@ import {
   matchTypeHomeLabel,
 } from '../lib/format-match'
 import { playersSeekProfileLabel } from '../lib/players-seek-profile'
+import type { MatchCourtCost } from '../lib/match-court-cost'
 import { useScreenTheme } from '../lib/theme-ui'
 import type { MatchOpportunity, MatchType } from '../lib/types'
+import { MatchCourtCostCard } from './match-court-cost-card'
 
 function isTeamPickType(type: MatchType): boolean {
   return (
@@ -35,6 +37,7 @@ type Props = {
   onJoin?: () => void | Promise<void>
   currentUserId?: string
   onShareRevuelta?: () => void
+  courtCost?: MatchCourtCost | null
 }
 
 function actionLabel(type: MatchType, isOwn: boolean, isJoined: boolean): string {
@@ -87,6 +90,7 @@ export function HomeMatchCard({
   onJoin,
   currentUserId,
   onShareRevuelta,
+  courtCost,
 }: Props) {
   const theme = useScreenTheme()
   const s = useMemo(() => createCardStyles(theme), [theme])
@@ -136,6 +140,9 @@ export function HomeMatchCard({
           <Text style={s.meta}>
             📍 {match.venue}, {match.location}
           </Text>
+          {courtCost ? (
+            <MatchCourtCostCard cost={courtCost} compact />
+          ) : null}
           {match.playersNeeded != null ? (
             <View style={s.progressRow}>
               <Text style={s.meta}>
@@ -152,8 +159,7 @@ export function HomeMatchCard({
               {Math.max(
                 0,
                 match.playersNeeded - (match.playersJoined ?? 0)
-              )}{' '}
-              · Total en cancha (organizador incluido).
+              )}
             </Text>
           ) : null}
           {match.type === 'players' ? (

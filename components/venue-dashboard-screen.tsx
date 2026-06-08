@@ -16,6 +16,7 @@ import { SafeAreaView } from 'react-native-safe-area-context'
 
 import { useApp } from '../lib/app-provider'
 import { useScreenTheme } from '../lib/theme-ui'
+import { BallLoadingIndicator } from './ball-loading-indicator'
 import { getSupabase, isSupabaseConfigured } from '../lib/supabase/client'
 import {
   fetchVenueCourts,
@@ -579,9 +580,7 @@ export function VenueDashboardScreen() {
       </View>
 
       {loading ? (
-        <View style={styles.center}>
-          <ActivityIndicator size="large" />
-        </View>
+        <BallLoadingIndicator fullScreen size="lg" />
       ) : !venue ? (
         <ScrollView contentContainerStyle={styles.emptyPad}>
           <Text style={styles.emptyTitle}>Aún no hay centro vinculado</Text>

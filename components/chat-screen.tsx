@@ -49,6 +49,7 @@ import {
   isMatchChatMessagingOpen,
   type MatchOpportunityRatingRow,
 } from '../lib/supabase/rating-queries'
+import { BallLoadingIndicator } from './ball-loading-indicator'
 import { MatchCompletionPanel } from './match-completion-panel'
 
 type UiMessage = ChatMessageRow & { isMe: boolean; pending?: boolean }
@@ -565,10 +566,7 @@ export function ChatScreen() {
   if (!opportunity) {
     return (
       <SafeAreaView style={[styles.safe, { backgroundColor: theme.bg }]} edges={['top']}>
-        <View style={styles.center}>
-          <ActivityIndicator size="large" />
-          <Text style={styles.muted}>Cargando partido…</Text>
-        </View>
+        <BallLoadingIndicator fullScreen size="lg" message="Cargando partido…" />
       </SafeAreaView>
     )
   }
@@ -658,7 +656,7 @@ export function ChatScreen() {
             ) : null}
             <Text style={styles.partTitle}>Participantes</Text>
             {loadingParticipants ? (
-              <Text style={styles.infoMeta}>Cargando…</Text>
+              <BallLoadingIndicator size="sm" message="Cargando…" />
             ) : participants.length > 0 ? (
               participants.map((p) => (
                 <View key={p.id} style={styles.partRow}>
@@ -704,7 +702,11 @@ export function ChatScreen() {
           }
           ListEmptyComponent={
             loading ? (
-              <Text style={styles.loadingText}>Cargando mensajes…</Text>
+              <BallLoadingIndicator
+                size="md"
+                message="Cargando mensajes…"
+                style={{ paddingVertical: 24 }}
+              />
             ) : (
               <Text style={styles.loadingText}>Sin mensajes aún.</Text>
             )

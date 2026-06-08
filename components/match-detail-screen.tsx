@@ -7,8 +7,8 @@ import {
   Image,
   Pressable,
   ScrollView,
+  Share,
   StyleSheet,
-  Switch,
   Text,
   TextInput,
   View,
@@ -34,6 +34,12 @@ import {
   type MatchOpportunityRatingRow,
   type RatingSummary,
 } from '../lib/supabase/rating-queries'
+import { BallLoadingIndicator } from './ball-loading-indicator'
+import { JoinMatchRoleModal } from './join-match-role-modal'
+import { MatchJoinSuccessModal } from './match-join-success-modal'
+import { MatchLeaveSuccessModal } from './match-leave-success-modal'
+import { LeaveMatchModal } from './leave-match-modal'
+import { MatchCourtCostCard } from './match-court-cost-card'
 import { MatchCompletionPanel } from './match-completion-panel'
 import { MatchPitchLineup } from './match-pitch-lineup'
 import { PublicPlayerProfileModal } from './public-player-profile-modal'
@@ -43,6 +49,10 @@ import {
   fetchRivalParticipantTeamIds,
   type RivalEncounterDetail,
 } from '../lib/supabase/rival-match-detail'
+import type { MatchCourtCost } from '../lib/match-court-cost'
+import { matchInviteSharePayload } from '../lib/match-invite-share'
+import { supportsLeaveWithReason } from '../lib/match-leave-reasons'
+import { fetchMatchCourtCost } from '../lib/supabase/match-court-cost-queries'
 import {
   buildMatchLineupLayout,
   buildRivalMatchLineupLayout,
@@ -66,6 +76,8 @@ function isUserInvolved(
 ) {
   return creatorId === userId || participatingIds.includes(oppId)
 }
+
+const MAX_GOALKEEPERS = 2
 
 function isTeamPickType(type: string): boolean {
   return (
@@ -123,6 +135,7 @@ export function MatchDetailScreen() {
     refreshMatchData,
     joinMatchOpportunity,
     leaveRivalMatchOpportunity,
+    leaveMatchOpportunity,
     teams,
     getUserTeams,
     finalizeMatchOpportunity,
@@ -130,7 +143,12 @@ export function MatchDetailScreen() {
     submitMatchRating,
   } = useApp()
   const [busy, setBusy] = useState(false)
-  const [wantGk, setWantGk] = useState(false)
+  const [joinRoleModalVisible, setJoinRoleModalVisible] = useState(false)
+  const [joinRoleGkOnly, setJoinRoleGkOnly] = useState(false)
+  const [joinSuccessVisible, setJoinSuccessVisible] = useState(false)
+  const [joinedAsGoalkeeper, setJoinedAsGoalkeeper] = useState(false)
+  const [leaveSuccessVisible, setLeaveSuccessVisible] = useState(false)
+  const [leaveSuccessMessage, setLeaveSuccessMessage] = useState<string | undefined>()
   const [teamPickTeam, setTeamPickTeam] = useState<'A' | 'B'>('A')
   const [teamPickRole, setTeamPickRole] = useState<
     'gk' | 'defensa' | 'mediocampista' | 'delantero'
@@ -156,6 +174,8 @@ export function MatchDetailScreen() {
   >(new Map())
   const [loadingRivalMeta, setLoadingRivalMeta] = useState(false)
   const [profileUserId, setProfileUserId] = useState<string | null>(null)
+  const [leaveModalVisible, setLeaveModalVisible] = useState(false)
+  const [courtCost, setCourtCost] = useState<MatchCourtCost | null>(null)
   const { resolved, tokens } = useThemePreference()
   const isDark = resolved === 'dark'
 
@@ -225,6 +245,36 @@ export function MatchDetailScreen() {
     void loadParticipants()
     void loadRatingsOverview()
   }, [loadParticipants, loadRatingsOverview])
+
+  useEffect(() => {
+    if (!opp || !isSupabaseConfigured() || opp.type === 'rival') {
+      setCourtCost(null)
+      return
+    }
+    if (!opp.sportsVenueId && !opp.venueReservationId) {
+      setCourtCost(null)
+      return
+    }
+    let cancelled = false
+    void (async () => {
+      try {
+        const cost = await fetchMatchCourtCost(getSupabase(), opp)
+        if (!cancelled) setCourtCost(cost)
+      } catch {
+        if (!cancelled) setCourtCost(null)
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [
+    opp?.id,
+    opp?.sportsVenueId,
+    opp?.venueReservationId,
+    opp?.playersNeeded,
+    opp?.creatorName,
+    opp?.type,
+  ])
 
   const loadRivalEncounter = useCallback(async () => {
     if (!id || !opp || opp.type !== 'rival' || !isSupabaseConfigured()) {
@@ -322,6 +372,37 @@ export function MatchDetailScreen() {
 
   const isParticipant = participatingOpportunityIds.includes(opp?.id ?? '')
 
+  const isRivalMatchEarly = opp?.type === 'rival'
+
+  const canLeaveActiveMatch =
+    !!opp &&
+    !!currentUser &&
+    isParticipant &&
+    (opp.status === 'pending' || opp.status === 'confirmed') &&
+    opp.dateTime.getTime() >= midnight.getTime()
+
+  const canLeaveRivalMatch = canLeaveActiveMatch && isRivalMatchEarly
+
+  const slotsLeftForInvite = useMemo(() => {
+    if (!opp?.playersNeeded) return undefined
+    const joined = opp.playersJoined ?? participants.length
+    return Math.max(0, opp.playersNeeded - joined)
+  }, [opp?.playersNeeded, opp?.playersJoined, participants.length])
+
+  const canShareMatchInvite = useMemo(() => {
+    if (!involved || !opp) return false
+    if (opp.status === 'completed' || opp.status === 'cancelled') return false
+    if (opp.dateTime.getTime() < midnight.getTime()) return false
+    if (opp.playersNeeded != null && slotsLeftForInvite === 0) return false
+    return true
+  }, [involved, opp, midnight, slotsLeftForInvite])
+
+  const canLeaveWithReason =
+    canLeaveActiveMatch &&
+    !isRivalMatchEarly &&
+    currentUser.id !== opp.creatorId &&
+    supportsLeaveWithReason(opp.type)
+
   const topMvp = useMemo(() => {
     const top = ratingSummary?.mvpTally[0]
     if (!top) return null
@@ -383,7 +464,12 @@ export function MatchDetailScreen() {
     )
   }, [opp, rivalEncounterDisplay, participants, rivalSideByUser])
 
-  const showPitchLineup = !!lineupLayout && opp?.type !== 'rival'
+  const isRevueltaMatch = opp?.type === 'open'
+  const revueltaTeamsDrawn = Boolean(opp?.revueltaLineup)
+  const showPitchLineup =
+    !!lineupLayout &&
+    opp?.type !== 'rival' &&
+    (!isRevueltaMatch || revueltaTeamsDrawn)
   const isRivalMatch = opp?.type === 'rival'
 
   const onRivalSlotPress = async (pick: RivalSlotPick) => {
@@ -427,6 +513,27 @@ export function MatchDetailScreen() {
     }
   }
 
+  const onConfirmLeaveMatch = async (reason: string): Promise<boolean> => {
+    if (!id || busy) return false
+    setBusy(true)
+    try {
+      const res = await leaveMatchOpportunity(id, reason)
+      if (res.ok) {
+        await refreshMatchData()
+        await loadParticipants()
+        setLeaveSuccessMessage(
+          'Liberaste tu cupo para que otro jugador pueda sumarse. ¡Gracias por avisar!'
+        )
+        setLeaveSuccessVisible(true)
+        return true
+      }
+      Alert.alert('No se pudo salir', res.error ?? 'Error desconocido')
+      return false
+    } finally {
+      setBusy(false)
+    }
+  }
+
   const onLeaveRival = () => {
     if (!id || !opp || busy) return
     Alert.alert(
@@ -446,7 +553,10 @@ export function MatchDetailScreen() {
                   await refreshMatchData()
                   await loadParticipants()
                   await loadRivalEncounter()
-                  Alert.alert('Listo', 'Ya no estás en la plantilla de este partido.')
+                  setLeaveSuccessMessage(
+                    'Ya no estás en la plantilla de este encuentro. Tu cupo quedó libre.'
+                  )
+                  setLeaveSuccessVisible(true)
                   return
                 }
                 Alert.alert('No se pudo salir', res.error ?? 'Error desconocido')
@@ -460,17 +570,19 @@ export function MatchDetailScreen() {
     )
   }
 
-  const onJoin = async () => {
-    if (!opp || !id) return
+  const onJoin = async (chosenAsGk?: boolean): Promise<boolean> => {
+    if (!opp || !id) return false
     let asGk: boolean | undefined
-    if (opp.type === 'open' || isTeamPickType(opp.type)) {
-      asGk = wantGk
+    if (opp.type === 'open') {
+      asGk = chosenAsGk ?? false
+    } else if (isTeamPickType(opp.type)) {
+      asGk = undefined
     } else if (opp.type === 'players' && joinRules?.kind === 'gk_only') {
       asGk = true
     } else if (opp.type === 'players' && joinRules?.kind === 'field_only') {
       asGk = false
     } else if (opp.type === 'players' && joinRules?.kind === 'mixed') {
-      asGk = wantGk
+      asGk = chosenAsGk ?? false
     }
     setBusy(true)
     try {
@@ -489,17 +601,82 @@ export function MatchDetailScreen() {
       if (res.ok) {
         await refreshMatchData()
         await loadParticipants()
-        Alert.alert('Listo', 'Te uniste al partido.')
-        return
+        setJoinedAsGoalkeeper(asGk === true)
+        setJoinSuccessVisible(true)
+        return true
       }
       if ('kind' in res && res.kind === 'info') {
         Alert.alert(res.message)
-        return
+        return false
       }
       Alert.alert('No se pudo unir', 'error' in res ? res.error : 'Error desconocido')
+      return false
     } finally {
       setBusy(false)
     }
+  }
+
+  const onShareMatchInvite = () => {
+    if (!opp) return
+    const { message, url, title } = matchInviteSharePayload(opp, {
+      slotsLeft: slotsLeftForInvite,
+    })
+    void Share.share({ message, url, title })
+  }
+
+  const onSelectJoinRole = async (asGk: boolean) => {
+    const ok = await onJoin(asGk)
+    if (ok) {
+      setJoinRoleModalVisible(false)
+      setJoinRoleGkOnly(false)
+    }
+  }
+
+  const joinCapacity = useMemo(() => {
+    const cap = opp?.playersNeeded ?? 0
+    let gkCount = 0
+    let fieldCount = 0
+    for (const p of participants) {
+      if (p.status === 'cancelled' || p.status === 'invited') {
+        continue
+      }
+      if (p.isGoalkeeper) gkCount++
+      else fieldCount++
+    }
+    const gkLeft = Math.max(0, MAX_GOALKEEPERS - gkCount)
+    const fieldCap = Math.max(0, cap - MAX_GOALKEEPERS)
+    const fieldLeft = Math.max(0, fieldCap - fieldCount)
+    return { gkLeft, fieldLeft }
+  }, [participants, opp?.playersNeeded])
+
+  const onJoinButtonPress = () => {
+    if (busy || !opp) return
+
+    const needsRolePrompt =
+      canJoin &&
+      (opp.type === 'open' ||
+        (opp.type === 'players' && joinRules?.kind === 'mixed'))
+
+    if (needsRolePrompt) {
+      const { gkLeft, fieldLeft } = joinCapacity
+      if (gkLeft > 0) {
+        setJoinRoleGkOnly(fieldLeft <= 0)
+        setJoinRoleModalVisible(true)
+        return
+      }
+      void onJoin(false)
+      return
+    }
+
+    if (opp.type === 'players' && joinRules?.kind === 'gk_only') {
+      void onJoin(true)
+      return
+    }
+    if (opp.type === 'players' && joinRules?.kind === 'field_only') {
+      void onJoin(false)
+      return
+    }
+    void onJoin(false)
   }
 
   if (!currentUser || currentUser.accountType !== 'player') {
@@ -513,9 +690,11 @@ export function MatchDetailScreen() {
   if (!opp) {
     if (loadingOpp) {
       return (
-        <View style={[styles.center, { backgroundColor: tokens.bgDark }]}>
-          <ActivityIndicator size="large" color={tokens.primaryGreen} />
-        </View>
+        <BallLoadingIndicator
+          fullScreen
+          size="lg"
+          backgroundColor={tokens.bgDark}
+        />
       )
     }
     return (
@@ -529,11 +708,6 @@ export function MatchDetailScreen() {
       </View>
     )
   }
-
-  const showGkToggle =
-    canJoin &&
-    (opp.type === 'open' ||
-      (opp.type === 'players' && joinRules?.kind === 'mixed'))
 
   const joinedCount = opp.playersJoined ?? participants.length
   const neededCount = opp.playersNeeded ?? 12
@@ -609,7 +783,7 @@ export function MatchDetailScreen() {
       ) : null}
 
       {isRivalMatch && loadingRivalMeta && !rivalEncounter ? (
-        <ActivityIndicator color={tokens.primaryGreen} />
+        <BallLoadingIndicator size="sm" style={{ marginVertical: 12 }} />
       ) : null}
 
       {/* Info card */}
@@ -659,6 +833,13 @@ export function MatchDetailScreen() {
         </View>
       ) : null}
 
+      {courtCost && !isRivalMatch ? (
+        <MatchCourtCostCard
+          cost={courtCost}
+          organizerName={opp.creatorName}
+        />
+      ) : null}
+
       {/* Organizador */}
       <View style={[styles.sectionCard, styles.orgCard, { backgroundColor: tokens.cardDark, borderColor: tokens.borderDark }]}>
         <Image source={{ uri: opp.creatorPhoto }} style={styles.avatar} />
@@ -684,10 +865,25 @@ export function MatchDetailScreen() {
         </Pressable>
       ) : null}
 
-      {isRivalMatch &&
-      isParticipant &&
-      (opp.status === 'pending' || opp.status === 'confirmed') &&
-      opp.dateTime.getTime() >= midnight.getTime() ? (
+      {canShareMatchInvite ? (
+        <Pressable
+          style={[
+            styles.shareInviteBtn,
+            {
+              borderColor: tokens.primaryGreen + '66',
+              backgroundColor: isDark ? tokens.primaryGreen + '14' : tokens.primaryGreen + '10',
+            },
+          ]}
+          onPress={onShareMatchInvite}
+        >
+          <Ionicons name="share-social-outline" size={20} color={tokens.primaryGreen} />
+          <Text style={[styles.shareInviteBtnText, { color: tokens.primaryGreen }]}>
+            Invita a un amigo a jugar
+          </Text>
+        </Pressable>
+      ) : null}
+
+      {canLeaveRivalMatch ? (
         <Pressable
           style={[
             styles.leaveRivalBtn,
@@ -695,6 +891,21 @@ export function MatchDetailScreen() {
             busy && styles.primaryBtnDisabled,
           ]}
           onPress={onLeaveRival}
+          disabled={busy}
+        >
+          <Ionicons name="exit-outline" size={20} color={tokens.danger} />
+          <Text style={[styles.leaveRivalBtnText, { color: tokens.danger }]}>No puedo asistir</Text>
+        </Pressable>
+      ) : null}
+
+      {!isRivalMatch && canLeaveWithReason ? (
+        <Pressable
+          style={[
+            styles.leaveRivalBtn,
+            { borderColor: tokens.danger, backgroundColor: tokens.danger + '12' },
+            busy && styles.primaryBtnDisabled,
+          ]}
+          onPress={() => setLeaveModalVisible(true)}
           disabled={busy}
         >
           <Ionicons name="exit-outline" size={20} color={tokens.danger} />
@@ -721,8 +932,25 @@ export function MatchDetailScreen() {
             <Text style={[styles.sectionSub, { color: tokens.textMuted }]}>
               Formación {rivalLineupLayout.formationLabel}
             </Text>
+          ) : isRevueltaMatch && !revueltaTeamsDrawn ? (
+            <Text style={[styles.sectionSub, { color: tokens.textMuted }]}>
+              {fillPct >= 100
+                ? 'Sorteo pendiente'
+                : `${joinedCount}/${neededCount} jugadores`}
+            </Text>
           ) : null}
         </View>
+
+        {isRevueltaMatch && !revueltaTeamsDrawn ? (
+          <View style={[styles.tipBox, { backgroundColor: isDark ? 'rgba(255,255,255,0.05)' : '#F0F5EF', marginBottom: 8 }]}>
+            <Ionicons name="shuffle-outline" size={16} color={tokens.accentGold} />
+            <Text style={[styles.lineupJoinHint, { color: tokens.textMuted }]}>
+              {fillPct >= 100
+                ? 'Cupos completos. El organizador debe sortear equipos para ver la cancha con Equipo A y Equipo B.'
+                : 'Completa los cupos del partido. La cancha se mostrará cuando el organizador sortee los equipos.'}
+            </Text>
+          </View>
+        ) : null}
 
         {isRivalMatch && rivalLineupLayout ? (
           <>
@@ -751,7 +979,7 @@ export function MatchDetailScreen() {
             </View>
           </>
         ) : isRivalMatch && (loadingParticipants || loadingRivalMeta) ? (
-          <ActivityIndicator color={tokens.primaryGreen} style={{ marginVertical: 16 }} />
+          <BallLoadingIndicator size="sm" style={{ marginVertical: 16 }} />
         ) : null}
 
         {showPitchLineup && lineupLayout ? (
@@ -790,7 +1018,7 @@ export function MatchDetailScreen() {
             )}
           </>
         ) : isRivalMatch ? null : loadingParticipants ? (
-          <ActivityIndicator color={tokens.primaryGreen} style={{ marginVertical: 16 }} />
+          <BallLoadingIndicator size="sm" style={{ marginVertical: 16 }} />
         ) : participants.length > 0 ? (
           participants.map((p) => (
             <Pressable
@@ -937,24 +1165,9 @@ export function MatchDetailScreen() {
             </>
           ) : null}
 
-          {showGkToggle ? (
-            <View style={[styles.switchRow, { borderTopColor: tokens.borderDark }]}>
-              <View style={styles.switchLabelRow}>
-                <Ionicons name="hand-left-outline" size={18} color={tokens.textMuted} />
-                <Text style={[styles.switchLabel, { color: tokens.textPrimary }]}>Ir de arquero</Text>
-              </View>
-              <Switch
-                value={wantGk}
-                onValueChange={setWantGk}
-                trackColor={{ false: tokens.borderDark, true: tokens.primaryGreen + '88' }}
-                thumbColor={wantGk ? tokens.primaryGreen : '#f4f4f5'}
-              />
-            </View>
-          ) : null}
-
           <Pressable
             style={[styles.primaryBtn, { backgroundColor: tokens.primaryGreen }, busy && styles.primaryBtnDisabled]}
-            onPress={() => void onJoin()}
+            onPress={onJoinButtonPress}
             disabled={busy}
           >
             {busy ? (
@@ -962,7 +1175,7 @@ export function MatchDetailScreen() {
             ) : (
               <>
                 <Ionicons name="add-circle-outline" size={22} color="#fff" />
-                <Text style={styles.primaryBtnText}>Apuntarse al partido</Text>
+                <Text style={styles.primaryBtnText}>Unirme al partido</Text>
               </>
             )}
           </Pressable>
@@ -1007,6 +1220,41 @@ export function MatchDetailScreen() {
       contextType="match"
       contextId={opp.id}
       onClose={() => setProfileUserId(null)}
+    />
+    <LeaveMatchModal
+      visible={leaveModalVisible}
+      matchTitle={opp.title}
+      onClose={() => setLeaveModalVisible(false)}
+      onConfirm={onConfirmLeaveMatch}
+    />
+    <JoinMatchRoleModal
+      visible={joinRoleModalVisible}
+      matchTitle={opp.title}
+      fieldLeft={joinCapacity.fieldLeft}
+      gkLeft={joinCapacity.gkLeft}
+      gkOnly={joinRoleGkOnly}
+      submitting={busy}
+      onClose={() => {
+        if (busy) return
+        setJoinRoleModalVisible(false)
+        setJoinRoleGkOnly(false)
+      }}
+      onSelect={(asGk) => void onSelectJoinRole(asGk)}
+    />
+    <MatchJoinSuccessModal
+      visible={joinSuccessVisible}
+      matchTitle={opp.title}
+      joinedAsGoalkeeper={joinedAsGoalkeeper}
+      onClose={() => setJoinSuccessVisible(false)}
+    />
+    <MatchLeaveSuccessModal
+      visible={leaveSuccessVisible}
+      matchTitle={opp.title}
+      message={leaveSuccessMessage}
+      onClose={() => {
+        setLeaveSuccessVisible(false)
+        setLeaveSuccessMessage(undefined)
+      }}
     />
     </Fragment>
   )
@@ -1125,6 +1373,18 @@ const styles = StyleSheet.create({
     borderWidth: 1,
   },
   chatBtnText: { flex: 1, fontSize: 16, fontWeight: '700', color: '#fff' },
+  shareInviteBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    borderRadius: 14,
+    paddingVertical: 14,
+    paddingHorizontal: 16,
+    borderWidth: 1.5,
+    marginTop: 8,
+  },
+  shareInviteBtnText: { fontSize: 15, fontWeight: '700' },
   leaveRivalBtn: {
     flexDirection: 'row',
     alignItems: 'center',

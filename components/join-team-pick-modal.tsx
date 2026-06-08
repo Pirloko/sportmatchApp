@@ -48,8 +48,6 @@ export function JoinTeamPickModal({
 
   const title = useMemo(() => opportunity?.title ?? 'Selección de equipos', [opportunity])
 
-  if (!opportunity) return null
-
   const handleJoin = async () => {
     if (!canSubmit) return
     setSubmitting(true)
@@ -64,6 +62,8 @@ export function JoinTeamPickModal({
       setSubmitting(false)
     }
   }
+
+  if (!opportunity) return null
 
   return (
     <Modal visible={visible} transparent animationType="slide">

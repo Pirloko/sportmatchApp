@@ -26,6 +26,7 @@ import { getSupabase, isSupabaseConfigured } from '../lib/supabase/client'
 import { fetchLastPlayedMaps } from '../lib/supabase/ranking-queries'
 import { useThemePreference } from '../lib/theme-context'
 import { useScreenTheme } from '../lib/theme-ui'
+import { BallLoadingIndicator } from './ball-loading-indicator'
 
 type Tab = 'players' | 'teams'
 
@@ -506,9 +507,7 @@ export function RankingScreen() {
       </View>
 
       {loading ? (
-        <View style={styles.center}>
-          <ActivityIndicator color={theme.primary} />
-        </View>
+        <BallLoadingIndicator fullScreen size="lg" />
       ) : tab === 'players' ? (
         <FlatList
           data={playerRows}

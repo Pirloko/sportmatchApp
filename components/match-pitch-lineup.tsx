@@ -18,6 +18,7 @@ import {
   lineupRoleLabel,
   slotRoleLabel,
 } from '../lib/match-lineup-slots'
+import { BallLoadingIndicator } from './ball-loading-indicator'
 import {
   RIVAL_PITCH_SLOT_DEFS,
   rivalSlotPickFromPress,
@@ -170,10 +171,11 @@ export function MatchPitchLineup({
           { borderColor: theme.frame, width: maxBlockWidth },
         ]}
       >
-        <ActivityIndicator color={theme.accent} />
-        <Text style={[styles.loadingText, { color: theme.muted }]}>
-          Cargando plantilla…
-        </Text>
+        <BallLoadingIndicator
+          size="md"
+          message="Cargando plantilla…"
+          textColor={theme.muted}
+        />
       </View>
     )
   }

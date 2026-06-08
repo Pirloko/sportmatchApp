@@ -222,6 +222,7 @@ export function ProfileScreen() {
 
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [photoWorking, setPhotoWorking] = useState(false)
+  const [photoPreviewUri, setPhotoPreviewUri] = useState<string | null>(null)
   const [deleteBusy, setDeleteBusy] = useState(false)
   const [mvpWins, setMvpWins] = useState(0)
   const [sharingProfile, setSharingProfile] = useState(false)
@@ -351,6 +352,7 @@ export function ProfileScreen() {
         Alert.alert('Configura Supabase para subir fotos.')
         return
       }
+      setPhotoPreviewUri(asset.uri)
       setPhotoWorking(true)
       try {
         const r = await updateProfilePhoto(
@@ -358,7 +360,12 @@ export function ProfileScreen() {
           asset.mimeType ?? 'image/jpeg',
           asset.fileSize ?? null
         )
-        if (!r.ok && r.error) Alert.alert('No se pudo actualizar la foto', r.error)
+        if (!r.ok && r.error) {
+          setPhotoPreviewUri(null)
+          Alert.alert('No se pudo actualizar la foto', r.error)
+        } else {
+          setPhotoPreviewUri(null)
+        }
       } finally {
         setPhotoWorking(false)
       }
@@ -470,7 +477,7 @@ export function ProfileScreen() {
   }
 
   const firstName = currentUser.name.split(/\s+/)[0]?.trim() || 'Jugador'
-  const avatarUri = currentUser.photo || DEFAULT_AVATAR
+  const avatarUri = photoPreviewUri ?? currentUser.photo ?? DEFAULT_AVATAR
 
   return (
     <SafeAreaView style={[styles.safe, { backgroundColor: theme.bg }]} edges={['top']}>
@@ -539,7 +546,7 @@ export function ProfileScreen() {
                       <ActivityIndicator size="large" color={theme.primary} />
                     </View>
                   ) : null}
-                  <Image source={{ uri: avatarUri }} style={styles.avatarImg} />
+                  <Image key={avatarUri} source={{ uri: avatarUri }} style={styles.avatarImg} />
                 </Pressable>
                 <Pressable
                   style={[styles.camFab, { backgroundColor: theme.primary, borderColor: theme.card }]}

@@ -18,6 +18,7 @@ import {
 } from '../lib/create-prefill'
 import { useApp } from '../lib/app-provider'
 import { useScreenTheme } from '../lib/theme-ui'
+import { BallLoadingIndicator } from './ball-loading-indicator'
 import { getSupabase, isSupabaseConfigured } from '../lib/supabase/client'
 import type { PublicVenuePageData } from '../lib/supabase/venue-public-queries'
 import type { VenueReservationRow } from '../lib/types'
@@ -213,7 +214,7 @@ export function VenueCentroScreen({ data }: Props) {
         </Text>
 
         {loading ? (
-          <Text style={styles.muted}>Cargando…</Text>
+          <BallLoadingIndicator size="sm" message="Cargando…" />
         ) : weeklyHours.length === 0 || courts.length === 0 ? (
           <Text style={styles.muted}>
             Este centro aún no tiene horario o canchas configurados en la app.
@@ -278,13 +279,7 @@ export function VenueCentroScreen({ data }: Props) {
 }
 
 export function VenueCentroLoading() {
-  const theme = useScreenTheme()
-  const styles = useMemo(() => createStyles(theme), [theme])
-  return (
-    <View style={styles.center}>
-      <ActivityIndicator size="large" color={theme.primary} />
-    </View>
-  )
+  return <BallLoadingIndicator fullScreen size="lg" />
 }
 
 function createStyles(theme: ReturnType<typeof useScreenTheme>) {

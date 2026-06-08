@@ -8,6 +8,13 @@ export function profileAvatarStoragePath(userId: string): string {
   return `${userId}/avatar`
 }
 
+/** Misma ruta en Storage → misma URL pública; sin esto la app y el CDN muestran la foto anterior. */
+export function withAvatarCacheBuster(publicUrl: string, version?: number): string {
+  const base = publicUrl.split('?')[0]?.split('#')[0] ?? publicUrl
+  const v = version ?? Date.now()
+  return `${base}?v=${v}`
+}
+
 const MAX_BYTES = 2 * 1024 * 1024
 const ALLOWED = ['image/jpeg', 'image/png', 'image/webp', 'image/gif']
 
@@ -63,7 +70,7 @@ export async function uploadProfileAvatarFromUri(
     .upload(path, arrayBuffer, {
       upsert: true,
       contentType: type,
-      cacheControl: '3600',
+      cacheControl: '60',
     })
 
   if (upErr) {
@@ -71,5 +78,5 @@ export async function uploadProfileAvatarFromUri(
   }
 
   const { data } = supabase.storage.from(PROFILE_AVATARS_BUCKET).getPublicUrl(path)
-  return { publicUrl: data.publicUrl }
+  return { publicUrl: withAvatarCacheBuster(data.publicUrl) }
 }

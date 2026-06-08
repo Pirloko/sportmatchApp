@@ -1,11 +1,19 @@
 import { Stack } from 'expo-router';
 
+import { useThemePreference } from '../../../lib/theme-context';
+import { buildScreenTheme, navigationThemeOptions } from '../../../lib/theme-ui';
+
 export default function PartidosStackLayout() {
+  const { tokens, resolved } = useThemePreference();
+  const theme = buildScreenTheme(tokens, resolved);
+  const nav = navigationThemeOptions(theme);
+
   return (
     <Stack
       screenOptions={{
         headerShown: true,
         headerBackTitle: 'Atrás',
+        ...nav,
       }}
     >
       <Stack.Screen name="index" options={{ title: 'Partidos', headerShown: false }} />

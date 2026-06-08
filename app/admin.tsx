@@ -1,6 +1,5 @@
 import { Redirect } from 'expo-router'
-import { ActivityIndicator, StyleSheet, View } from 'react-native'
-
+import { BallLoadingIndicator } from '../components/ball-loading-indicator'
 import { AdminDashboardScreen } from '../components/admin-dashboard-screen'
 import { useApp } from '../lib/app-provider'
 import { isPlayerOnlyMobilePlatform } from '../lib/mobile-app-access'
@@ -13,11 +12,7 @@ export default function AdminRoute() {
   }
 
   if (authLoading) {
-    return (
-      <View style={styles.center}>
-        <ActivityIndicator size="large" />
-      </View>
-    )
+    return <BallLoadingIndicator fullScreen size="lg" />
   }
 
   if (!currentUser || currentUser.accountType !== 'admin') {
@@ -27,11 +22,3 @@ export default function AdminRoute() {
   return <AdminDashboardScreen />
 }
 
-const styles = StyleSheet.create({
-  center: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    backgroundColor: '#fff',
-  },
-})

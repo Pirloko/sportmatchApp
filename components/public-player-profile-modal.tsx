@@ -32,6 +32,7 @@ import {
 } from '../lib/supabase/public-player-profile'
 import { getSupabase, isSupabaseConfigured } from '../lib/supabase/client'
 import { useScreenTheme } from '../lib/theme-ui'
+import { BallLoadingIndicator } from './ball-loading-indicator'
 
 type PublicPlayerProfileModalProps = {
   visible: boolean
@@ -164,10 +165,7 @@ export function PublicPlayerProfileModal({
 
         {loading ? (
           <View style={styles.centered}>
-            <ActivityIndicator size="large" color={theme.primary} />
-            <Text style={[styles.loadingText, { color: theme.textMuted }]}>
-              Cargando perfil…
-            </Text>
+            <BallLoadingIndicator size="md" message="Cargando perfil…" />
           </View>
         ) : error ? (
           <View style={styles.centered}>

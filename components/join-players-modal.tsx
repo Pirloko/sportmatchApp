@@ -34,29 +34,29 @@ export function JoinPlayersModal({
     visible && opportunity != null
   )
 
-  if (!opportunity) return null
-
-  const rules = playersJoinRules(opportunity)
-  const needed = opportunity.playersNeeded ?? 0
+  const rules = opportunity ? playersJoinRules(opportunity) : null
+  const needed = opportunity?.playersNeeded ?? 0
   const joined = joinedCount
   const full = needed > 0 && joined >= needed
   const left = needed > 0 ? Math.max(0, needed - joined) : 0
 
-  const gkSlotMixed = rules.kind === 'mixed' && gkCount < 1
+  const gkSlotMixed = rules?.kind === 'mixed' && gkCount < 1
   const fieldSlotMixed =
-    rules.kind === 'mixed' && fieldCount < Math.max(0, needed - 1)
-  const gkSlotOnly = rules.kind === 'gk_only' && gkCount < needed
-  const fieldSlotOnly = rules.kind === 'field_only' && fieldCount < needed
+    rules?.kind === 'mixed' && fieldCount < Math.max(0, needed - 1)
+  const gkSlotOnly = rules?.kind === 'gk_only' && gkCount < needed
+  const fieldSlotOnly = rules?.kind === 'field_only' && fieldCount < needed
 
   const summaryTitle = useMemo(() => {
+    if (!opportunity) return ''
     if (loading) return 'Revisando cupos…'
     if (needed <= 0) return 'Cupos disponibles'
     if (full) return 'Cupos completos'
     if (left === 1) return 'Queda 1 cupo'
     return `Quedan ${left} cupos`
-  }, [loading, needed, full, left])
+  }, [opportunity, loading, needed, full, left])
 
   const summaryDetail = useMemo(() => {
+    if (!opportunity || !rules) return ''
     if (loading) return 'Un segundo…'
     if (needed <= 0) return 'El organizador está recibiendo postulaciones.'
     if (full) return 'Ya no quedan cupos para sumarse a esta búsqueda.'
@@ -79,10 +79,10 @@ export function JoinPlayersModal({
       case 'legacy':
         return left === 1 ? 'Se busca 1 jugador.' : `Se buscan ${left} jugadores.`
     }
-  }, [loading, needed, full, left, rules.kind, gkCount, fieldCount])
+  }, [opportunity, rules, loading, needed, full, left, gkCount, fieldCount])
 
   const handleJoin = async (asGk: boolean) => {
-    if (full) return
+    if (!opportunity || full) return
     setSubmitting(true)
     try {
       const ok = await onJoin(asGk)
@@ -91,6 +91,8 @@ export function JoinPlayersModal({
       setSubmitting(false)
     }
   }
+
+  if (!opportunity || !rules) return null
 
   return (
     <Modal visible={visible} transparent animationType="slide">

@@ -1,7 +1,6 @@
 import { Redirect } from 'expo-router'
 import { lazy, Suspense } from 'react'
-import { ActivityIndicator, StyleSheet, View } from 'react-native'
-
+import { BallLoadingIndicator } from '../components/ball-loading-indicator'
 import { useApp } from '../lib/app-provider'
 import { isPlayerOnlyMobilePlatform } from '../lib/mobile-app-access'
 
@@ -19,11 +18,7 @@ export default function MiCentroRoute() {
   }
 
   if (authLoading) {
-    return (
-      <View style={styles.center}>
-        <ActivityIndicator size="large" />
-      </View>
-    )
+    return <BallLoadingIndicator fullScreen size="lg" />
   }
 
   if (!currentUser || currentUser.accountType !== 'venue') {
@@ -31,23 +26,9 @@ export default function MiCentroRoute() {
   }
 
   return (
-    <Suspense
-      fallback={
-        <View style={styles.center}>
-          <ActivityIndicator size="large" />
-        </View>
-      }
-    >
+    <Suspense fallback={<BallLoadingIndicator fullScreen size="lg" />}>
       <VenueDashboardScreen />
     </Suspense>
   )
 }
 
-const styles = StyleSheet.create({
-  center: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    backgroundColor: '#fff',
-  },
-})

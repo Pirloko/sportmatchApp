@@ -18,6 +18,7 @@ import {
 import type { OpportunityParticipantRow } from '../lib/supabase/message-queries'
 import { type MatchOpportunityRatingRow } from '../lib/supabase/rating-queries'
 import { useScreenTheme } from '../lib/theme-ui'
+import { BallLoadingIndicator } from './ball-loading-indicator'
 
 function isTeamPickType(type: MatchOpportunity['type']): boolean {
   return (
@@ -521,7 +522,7 @@ export function MatchCompletionPanel({
       )}
 
       {loadingRating && (
-        <Text style={styles.mutedSmall}>Cargando tu reseña…</Text>
+        <BallLoadingIndicator size="sm" message="Cargando tu reseña…" />
       )}
 
       {myRating && (
@@ -556,9 +557,10 @@ export function MatchCompletionPanel({
           />
           <Text style={styles.inputLabel}>MVP del partido</Text>
           {mvpCandidates.length === 0 ? (
-            <Text style={styles.mutedSmall}>
-              Cargando participantes para elegir MVP…
-            </Text>
+            <BallLoadingIndicator
+              size="sm"
+              message="Cargando participantes para elegir MVP…"
+            />
           ) : (
             <View style={styles.mvpList}>
               {mvpCandidates.map((p) => {

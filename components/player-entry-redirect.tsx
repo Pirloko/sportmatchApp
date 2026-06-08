@@ -1,8 +1,7 @@
 import AsyncStorage from '@react-native-async-storage/async-storage'
 import { Redirect } from 'expo-router'
 import { useEffect, useState } from 'react'
-import { ActivityIndicator, StyleSheet, View } from 'react-native'
-
+import { BallLoadingIndicator } from './ball-loading-indicator'
 import { readCreatePrefill } from '../lib/create-prefill'
 import { useApp } from '../lib/app-provider'
 import {
@@ -41,20 +40,9 @@ export function PlayerEntryRedirect() {
   }, [setTeamsDetailFocusTeamId])
 
   if (href === null) {
-    return (
-      <View style={[styles.center, { backgroundColor: theme.bg }]}>
-        <ActivityIndicator size="large" color={theme.primary} />
-      </View>
-    )
+    return <BallLoadingIndicator fullScreen size="lg" backgroundColor={theme.bg} />
   }
 
   return <Redirect href={href} />
 }
 
-const styles = StyleSheet.create({
-  center: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-})

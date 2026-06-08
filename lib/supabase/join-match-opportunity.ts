@@ -234,16 +234,18 @@ export async function joinMatchOpportunityAction(
     }
   }
 
-  const { error } = await supabase.from('match_opportunity_participants').insert({
-    opportunity_id: opp.id,
-    user_id: currentUser.id,
-    status: 'confirmed',
-    is_goalkeeper: insertAsGk,
-  })
+  const { error } = await supabase.from('match_opportunity_participants').upsert(
+    {
+      opportunity_id: opp.id,
+      user_id: currentUser.id,
+      status: 'confirmed',
+      is_goalkeeper: insertAsGk,
+      cancelled_at: null,
+      cancelled_reason: null,
+    },
+    { onConflict: 'opportunity_id,user_id' }
+  )
   if (error) {
-    if (error.code === '23505') {
-      return { ok: false, kind: 'info', message: 'Ya estás registrado en este partido.' }
-    }
     return { ok: false, error: error.message }
   }
 

@@ -1,7 +1,7 @@
 import { forwardRef } from 'react'
 import { Image, StyleSheet, Text, View } from 'react-native'
 
-const SPORTMATCH_LOGO = require('../assets/sportmatch-logo.png')
+import { APP_LOGO } from '../lib/app-brand-assets'
 
 export type ProfileShareTeamEntry = {
   id: string
@@ -66,7 +66,7 @@ export const ProfileShareCard = forwardRef<View, Props>(function ProfileShareCar
       {/* ── Cabecera compacta ── */}
       <View style={styles.headerRow}>
         <View style={styles.logoWrap}>
-          <Image source={SPORTMATCH_LOGO} style={styles.logo} resizeMode="contain" />
+          <Image source={APP_LOGO} style={styles.logo} resizeMode="contain" />
         </View>
         <View style={styles.headerTextCol}>
           <Text style={styles.brandName}>SportMatch</Text>

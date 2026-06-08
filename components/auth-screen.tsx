@@ -16,6 +16,7 @@ import {
 } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
 
+import { APP_LOGO } from '../lib/app-brand-assets'
 import { useApp } from '../lib/app-provider'
 import { useThemePreference } from '../lib/theme-context'
 import type { Gender } from '../lib/types'
@@ -178,7 +179,7 @@ export function AuthScreen() {
 
         <Animated.View style={[styles.logoWrap, { transform: [{ translateY: floatAnim }] }]}>
           <Image
-            source={require('../assets/sportmatch-logo.png')}
+            source={APP_LOGO}
             style={styles.logo}
             resizeMode="contain"
           />

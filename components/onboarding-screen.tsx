@@ -19,6 +19,7 @@ import {
 } from 'react-native'
 
 import { takeAndroidPendingImageAsset } from '../lib/android-image-picker-pending'
+import { APP_LOGO } from '../lib/app-brand-assets'
 import { useApp } from '../lib/app-provider'
 import {
   ageFromBirthDate,
@@ -480,7 +481,7 @@ export function OnboardingScreen() {
       >
         <View style={styles.heroCard}>
           <Image
-            source={require('../assets/sportmatch-logo.png')}
+            source={APP_LOGO}
             style={styles.heroImage}
             contentFit="contain"
           />

@@ -84,6 +84,7 @@ import {
   joinMatchOpportunityAction,
   type JoinMatchResult,
 } from './supabase/join-match-opportunity'
+import { leaveMatchOpportunityWithReason } from './supabase/leave-match-opportunity'
 import {
   insertRivalCreatorParticipant,
   leaveRivalMatchOpportunity as leaveRivalMatchOpportunityAction,
@@ -217,6 +218,11 @@ type AppContextType = {
   /** Abandonar encuentro rival (libera cupo). */
   leaveRivalMatchOpportunity: (
     opportunityId: string
+  ) => Promise<{ ok: boolean; error?: string }>
+  /** Revuelta / selección de equipos / players: salir con motivo (libera cupo). */
+  leaveMatchOpportunity: (
+    opportunityId: string,
+    reason: string
   ) => Promise<{ ok: boolean; error?: string }>
   respondToMatchInvitation: (
     opportunityId: string,
@@ -1493,6 +1499,33 @@ export function AppProvider({ children }: { children: ReactNode }) {
     [currentUser, supabase]
   )
 
+  const leaveMatchOpportunity = useCallback(
+    async (
+      opportunityId: string,
+      reason: string
+    ): Promise<{ ok: boolean; error?: string }> => {
+      if (!currentUser || !supabase) {
+        return { ok: false, error: 'Sesión no disponible.' }
+      }
+      const result = await leaveMatchOpportunityWithReason(
+        supabase,
+        opportunityId,
+        reason
+      )
+      if (!result.ok) {
+        return { ok: false, error: result.error }
+      }
+      const [partIds, matches] = await Promise.all([
+        fetchParticipatingOpportunityIds(supabase, currentUser.id),
+        fetchMatchOpportunities(supabase),
+      ])
+      setParticipatingOpportunityIdsStable(partIds)
+      setMatchOpportunitiesStable(matches)
+      return { ok: true }
+    },
+    [currentUser, supabase]
+  )
+
   const joinMatchOpportunity = useCallback(
     async (
       opportunityId: string,
@@ -2679,6 +2712,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       refreshMatchData,
       joinMatchOpportunity,
       leaveRivalMatchOpportunity,
+      leaveMatchOpportunity,
       respondToMatchInvitation,
       finalizeMatchOpportunity,
       suspendMatchOpportunity,
@@ -2736,6 +2770,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       refreshMatchData,
       joinMatchOpportunity,
       leaveRivalMatchOpportunity,
+      leaveMatchOpportunity,
       respondToMatchInvitation,
       finalizeMatchOpportunity,
       suspendMatchOpportunity,

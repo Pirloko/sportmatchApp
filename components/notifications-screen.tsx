@@ -24,6 +24,7 @@ import {
   markNotificationRead,
 } from '../lib/supabase/notification-queries'
 import { useScreenTheme } from '../lib/theme-ui'
+import { BallLoadingIndicator } from './ball-loading-indicator'
 
 function iconForType(type: AppNotificationType): keyof typeof Ionicons.glyphMap {
   switch (type) {
@@ -238,9 +239,7 @@ export function NotificationsScreen() {
       </View>
 
       {loading ? (
-        <View style={styles.center}>
-          <ActivityIndicator color={theme.primary} />
-        </View>
+        <BallLoadingIndicator fullScreen size="lg" />
       ) : (
         <FlatList
           data={items}

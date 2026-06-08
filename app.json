@@ -9,7 +9,7 @@
     "userInterfaceStyle": "light",
     "newArchEnabled": false,
     "splash": {
-      "image": "./assets/sportmatch-logo.png",
+      "image": "./assets/logohome.webp",
       "resizeMode": "contain",
       "backgroundColor": "#000000"
     },
@@ -22,7 +22,7 @@
       "package": "com.pichanga.expo",
       "versionCode": 1,
       "adaptiveIcon": {
-        "foregroundImage": "./assets/icon.png",
+        "foregroundImage": "./assets/adaptive-icon.png",
         "backgroundColor": "#000000"
       },
       "blockedPermissions": [
@@ -50,7 +50,7 @@
       ]
     },
     "web": {
-      "favicon": "./assets/sportmatch-logo.png"
+      "favicon": "./assets/icon.png"
     },
     "plugins": [
       [

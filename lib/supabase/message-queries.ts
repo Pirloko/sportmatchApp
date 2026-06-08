@@ -9,6 +9,7 @@ export async function fetchParticipatingOpportunityIds(
     .from('match_opportunity_participants')
     .select('opportunity_id')
     .eq('user_id', userId)
+    .in('status', ['pending', 'confirmed'])
 
   return [
     ...new Set(
@@ -295,6 +296,8 @@ export async function fetchParticipantsForOpportunity(
   for (const p of parts ?? []) {
     const uid = p.user_id as string
     if (uid === creatorId) continue
+    const partStatus = (p.status as string) || 'pending'
+    if (partStatus === 'cancelled' || partStatus === 'rejected') continue
     const u = byId.get(uid)
     out.push({
       id: uid,
