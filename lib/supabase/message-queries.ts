@@ -216,6 +216,8 @@ export type OpportunityParticipantRow = {
   id: string
   name: string
   photo: string
+  /** Posición de perfil (fallback si no hay encounter_lineup_role). */
+  position?: string
   status: 'creator' | 'confirmed' | 'pending' | 'invited' | 'cancelled'
   isGoalkeeper?: boolean
   pickTeam?: 'A' | 'B'
@@ -265,7 +267,7 @@ export async function fetchParticipantsForOpportunity(
 
   const { data: profs } = await supabase
     .from('profiles')
-    .select('id, name, photo_url')
+    .select('id, name, photo_url, position')
     .in('id', [...userIds])
 
   const byId = new Map((profs ?? []).map((r) => [r.id as string, r] as const))
@@ -282,6 +284,7 @@ export async function fetchParticipantsForOpportunity(
       id: creatorId,
       name: (c?.name as string) || 'Organizador',
       photo: (c?.photo_url as string) || DEFAULT_AVATAR,
+      position: (c?.position as string) || undefined,
       status: 'creator',
       isGoalkeeper: creatorPart ? creatorPart.is_goalkeeper === true : false,
       pickTeam:
@@ -303,6 +306,7 @@ export async function fetchParticipantsForOpportunity(
       id: uid,
       name: (u?.name as string) || 'Jugador',
       photo: (u?.photo_url as string) || DEFAULT_AVATAR,
+      position: (u?.position as string) || undefined,
       status: (p.status as OpportunityParticipantRow['status']) || 'pending',
       isGoalkeeper: p.is_goalkeeper === true,
       pickTeam:

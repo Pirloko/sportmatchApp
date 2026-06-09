@@ -50,7 +50,7 @@ BEGIN
 END;
 $$;
 
--- 2) Partidos en los que el jugador fue MVP ganador (más votos; desempate por user_id)
+-- 2) Partidos como MVP: empate en votos → cada empatado suma 1 MVP
 CREATE OR REPLACE FUNCTION public.player_mvp_wins_count(p_user_id uuid)
 RETURNS integer
 LANGUAGE sql
@@ -67,12 +67,19 @@ AS $$
     WHERE mor.mvp_user_id IS NOT NULL
     GROUP BY mor.opportunity_id, mor.mvp_user_id
   ),
-  winners AS (
-    SELECT DISTINCT ON (vote_counts.opportunity_id)
+  max_votes AS (
+    SELECT
       vote_counts.opportunity_id,
-      vote_counts.mvp_user_id
+      MAX(vote_counts.votes) AS max_votes
     FROM vote_counts
-    ORDER BY vote_counts.opportunity_id, vote_counts.votes DESC, vote_counts.mvp_user_id
+    GROUP BY vote_counts.opportunity_id
+  ),
+  winners AS (
+    SELECT vc.opportunity_id, vc.mvp_user_id
+    FROM vote_counts vc
+    INNER JOIN max_votes mv
+      ON mv.opportunity_id = vc.opportunity_id
+      AND vc.votes = mv.max_votes
   )
   SELECT COUNT(*)::integer
   FROM winners
@@ -80,7 +87,7 @@ AS $$
 $$;
 
 COMMENT ON FUNCTION public.player_mvp_wins_count(uuid) IS
-  'Cantidad de partidos finalizados donde el jugador fue MVP ganador (más votos en reseñas).';
+  'Partidos donde el jugador fue MVP: si hay empate en votos, cada empatado suma 1 MVP.';
 
 GRANT EXECUTE ON FUNCTION public.player_mvp_wins_count(uuid) TO authenticated;
 

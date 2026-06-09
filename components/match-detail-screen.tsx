@@ -31,6 +31,7 @@ import {
 import {
   fetchMatchDetailRatingsBundle,
   fetchRatingSummaryForOpportunity,
+  getMvpWinnersFromTally,
   type MatchOpportunityRatingRow,
   type RatingSummary,
 } from '../lib/supabase/rating-queries'
@@ -403,11 +404,15 @@ export function MatchDetailScreen() {
     currentUser.id !== opp.creatorId &&
     supportsLeaveWithReason(opp.type)
 
-  const topMvp = useMemo(() => {
-    const top = ratingSummary?.mvpTally[0]
-    if (!top) return null
-    const player = participants.find((p) => p.id === top.userId)
-    return { name: player?.name ?? 'Jugador', votes: top.votes }
+  const mvpWinners = useMemo(() => {
+    const winners = getMvpWinnersFromTally(ratingSummary?.mvpTally ?? [])
+    if (winners.length === 0) return null
+    const votes = winners[0].votes
+    const names = winners.map((w) => {
+      const player = participants.find((p) => p.id === w.userId)
+      return player?.name ?? 'Jugador'
+    })
+    return { names, votes, isTie: winners.length > 1 }
   }, [ratingSummary, participants])
 
   const canRivalPickSlot = useMemo(() => {
@@ -1061,9 +1066,13 @@ export function MatchDetailScreen() {
               </View>
             ))}
           </View>
-          {topMvp ? (
+          {mvpWinners ? (
             <Text style={[styles.mvpLine, { color: tokens.textPrimary }]}>
-              🏅 MVP: {topMvp.name} ({topMvp.votes} {topMvp.votes === 1 ? 'voto' : 'votos'})
+              🏅 {mvpWinners.isTie ? 'MVPs' : 'MVP'}:{' '}
+              {mvpWinners.names.join(', ')}
+              {mvpWinners.isTie
+                ? ` (empate · ${mvpWinners.votes} ${mvpWinners.votes === 1 ? 'voto' : 'votos'})`
+                : ` (${mvpWinners.votes} ${mvpWinners.votes === 1 ? 'voto' : 'votos'})`}
             </Text>
           ) : null}
           {recentComments.length > 0 ? (

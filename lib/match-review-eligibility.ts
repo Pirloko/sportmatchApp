@@ -1,4 +1,26 @@
+import { positionLabel } from './player-profile-ui'
 import type { OpportunityParticipantRow } from './supabase/message-queries'
+
+/** Etiqueta de posición para el selector MVP (destaca arqueros). */
+export function mvpParticipantRoleLabel(
+  p: Pick<
+    OpportunityParticipantRow,
+    'isGoalkeeper' | 'encounterRole' | 'position'
+  >
+): string {
+  if (p.isGoalkeeper || p.encounterRole === 'gk') return 'Arquero'
+  if (p.encounterRole === 'defensa') return 'Defensa'
+  if (p.encounterRole === 'mediocampista') return 'Mediocampista'
+  if (p.encounterRole === 'delantero') return 'Delantero'
+  if (p.position) return positionLabel(p.position)
+  return 'Jugador'
+}
+
+export function isMvpGoalkeeper(
+  p: Pick<OpportunityParticipantRow, 'isGoalkeeper' | 'encounterRole'>
+): boolean {
+  return p.isGoalkeeper === true || p.encounterRole === 'gk'
+}
 
 /** Organizador o participante confirmado: puede reseñar y aparecer como MVP. */
 export function isMatchReviewEligibleParticipant(

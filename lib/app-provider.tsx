@@ -77,6 +77,7 @@ import {
   fetchTeamsWithMembers,
 } from './supabase/team-queries'
 import { fetchParticipatingOpportunityIds } from './supabase/message-queries'
+import { isRatingWindowOpen } from './supabase/rating-queries'
 import { uploadProfileAvatarFromUri } from './supabase/profile-photo'
 import { fetchRivalChallengesForUser } from './supabase/rival-challenge-queries'
 import { fetchVenueForOwner } from './supabase/venue-owner-queries'
@@ -1299,6 +1300,13 @@ export function AppProvider({ children }: { children: ReactNode }) {
       if (payload.mvpUserId === currentUser.id) {
         return { ok: false, error: 'No puedes elegirte a ti mismo como MVP.' }
       }
+      const opp = matchOpportunities.find((m) => m.id === opportunityId)
+      if (opp?.finalizedAt && !isRatingWindowOpen(opp.finalizedAt)) {
+        return {
+          ok: false,
+          error: 'El plazo de reseña venció (24 h tras finalizar el partido).',
+        }
+      }
       const { error } = await supabase.from('match_opportunity_ratings').insert({
         opportunity_id: opportunityId,
         rater_id: currentUser.id,
@@ -1313,12 +1321,14 @@ export function AppProvider({ children }: { children: ReactNode }) {
         const msg =
           error.code === '23505'
             ? 'Ya enviaste tu reseña para este partido.'
-            : error.message
+            : error.message.includes('Plazo de reseña vencido')
+              ? 'El plazo de reseña venció (24 h tras finalizar el partido).'
+              : error.message
         return { ok: false, error: msg }
       }
       return { ok: true }
     },
-    [currentUser, supabase]
+    [currentUser, supabase, matchOpportunities]
   )
 
   const updateProfilePhoto = useCallback(

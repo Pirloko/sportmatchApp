@@ -10,13 +10,20 @@ import {
   View,
 } from 'react-native'
 
+import { formatRelativeUntil } from '../lib/format-match'
 import type { MatchOpportunity, RivalResult } from '../lib/types'
 import {
   filterMvpVoteCandidates,
+  isMvpGoalkeeper,
+  mvpParticipantRoleLabel,
   userCanSubmitMatchReview,
 } from '../lib/match-review-eligibility'
 import type { OpportunityParticipantRow } from '../lib/supabase/message-queries'
-import { type MatchOpportunityRatingRow } from '../lib/supabase/rating-queries'
+import {
+  getRatingDeadline,
+  isRatingWindowOpen,
+  type MatchOpportunityRatingRow,
+} from '../lib/supabase/rating-queries'
 import { useScreenTheme } from '../lib/theme-ui'
 import { BallLoadingIndicator } from './ball-loading-indicator'
 
@@ -114,14 +121,30 @@ export function MatchCompletionPanel({
   const isCreator = opportunity.creatorId === currentUserId
   const completed = opportunity.status === 'completed'
   const finalizedAt = opportunity.finalizedAt
-  const mvpCandidates = useMemo(
-    () => filterMvpVoteCandidates(participants, currentUserId),
-    [participants, currentUserId]
-  )
+  const reviewWindowOpen =
+    finalizedAt != null && isRatingWindowOpen(finalizedAt)
+  const mvpCandidates = useMemo(() => {
+    const list = filterMvpVoteCandidates(participants, currentUserId)
+    return [...list].sort((a, b) => {
+      const aGk = isMvpGoalkeeper(a)
+      const bGk = isMvpGoalkeeper(b)
+      if (aGk !== bGk) return aGk ? 1 : -1
+      return a.name.localeCompare(b.name, 'es')
+    })
+  }, [participants, currentUserId])
+  const reviewEligible = userCanSubmitMatchReview(currentUserId, participants)
   const canRate =
     completed &&
     finalizedAt != null &&
-    userCanSubmitMatchReview(currentUserId, participants) &&
+    reviewWindowOpen &&
+    reviewEligible &&
+    !myRating &&
+    !loadingRating
+  const reviewWindowClosed =
+    completed &&
+    finalizedAt != null &&
+    !reviewWindowOpen &&
+    reviewEligible &&
     !myRating &&
     !loadingRating
 
@@ -222,7 +245,7 @@ export function MatchCompletionPanel({
 
   const handleFinalize = async () => {
     const successMsg =
-      'Partido finalizado. Los jugadores pueden dejar su reseña cuando quieran.'
+      'Partido finalizado. Los jugadores tienen 24 h para dejar su reseña y elegir al MVP.'
 
     if (opportunity.type === 'rival') {
       if (!rivalPick) return
@@ -329,8 +352,8 @@ export function MatchCompletionPanel({
             {needsResolveAfterMidnight ? 'Resolver partido' : 'Finalizar partido'}
           </Text>
           <Text style={styles.hint}>
-            Al cerrar, se registrará el resultado y los jugadores podrán dejar
-            su reseña.
+            Al cerrar, se registrará el resultado. Reseñas, MVP y chat quedan
+            abiertos 24 h.
           </Text>
           {opportunity.type === 'rival' && (
             <View style={styles.radioBlock}>
@@ -531,9 +554,22 @@ export function MatchCompletionPanel({
         </Text>
       )}
 
+      {reviewWindowClosed && (
+        <Text style={styles.closedReview}>
+          Plazo de reseña cerrado: pasaron las 24 h desde que se finalizó el
+          partido.
+        </Text>
+      )}
+
       {canRate && (
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Tu reseña (una sola vez)</Text>
+          {finalizedAt ? (
+            <Text style={styles.hint}>
+              Tienes hasta {formatRelativeUntil(getRatingDeadline(finalizedAt))}{' '}
+              para enviar tu reseña y elegir al MVP.
+            </Text>
+          ) : null}
           <StarRow
             label="Recinto deportivo"
             value={venueStars}
@@ -556,6 +592,10 @@ export function MatchCompletionPanel({
             styles={styles}
           />
           <Text style={styles.inputLabel}>MVP del partido</Text>
+          <Text style={styles.miniHint}>
+            El jugador con más votos será MVP. Si hay empate, cada empatado será
+            MVP.
+          </Text>
           {mvpCandidates.length === 0 ? (
             <BallLoadingIndicator
               size="sm"
@@ -565,6 +605,8 @@ export function MatchCompletionPanel({
             <View style={styles.mvpList}>
               {mvpCandidates.map((p) => {
                 const selected = mvpUserId === p.id
+                const isGk = isMvpGoalkeeper(p)
+                const roleLabel = mvpParticipantRoleLabel(p)
                 return (
                   <Pressable
                     key={p.id}
@@ -572,13 +614,25 @@ export function MatchCompletionPanel({
                     style={[
                       styles.mvpRow,
                       selected && styles.mvpRowSelected,
+                      isGk && styles.mvpRowGk,
                     ]}
                     onPress={() => setMvpUserId(p.id)}
                   >
                     <Image source={{ uri: p.photo }} style={styles.mvpAvatar} />
-                    <Text style={styles.mvpName} numberOfLines={1}>
-                      {p.name}
-                    </Text>
+                    <View style={styles.mvpInfo}>
+                      <Text style={styles.mvpName} numberOfLines={1}>
+                        {p.name}
+                      </Text>
+                      <Text
+                        style={[
+                          styles.mvpRole,
+                          isGk && styles.mvpRoleGk,
+                        ]}
+                        numberOfLines={1}
+                      >
+                        {roleLabel}
+                      </Text>
+                    </View>
                     <View
                       style={[
                         styles.radioDot,
@@ -753,6 +807,12 @@ function createCompletionStyles(theme: ReturnType<typeof useScreenTheme>) {
     outcomeLine: { fontSize: 14, color: theme.textMuted, marginTop: 4 },
     mutedSmall: { fontSize: 12, color: theme.textMuted },
     thanks: { fontSize: 14, color: theme.primary, fontWeight: '600' },
+    closedReview: {
+      fontSize: 13,
+      color: theme.textMuted,
+      lineHeight: 18,
+      paddingVertical: 4,
+    },
     starBlock: { gap: 6 },
     starLabel: { fontSize: 14, color: theme.text },
     starRow: { flexDirection: 'row', gap: 6 },
@@ -786,7 +846,13 @@ function createCompletionStyles(theme: ReturnType<typeof useScreenTheme>) {
       borderColor: theme.primary,
       backgroundColor: theme.selectedTint,
     },
+    mvpRowGk: {
+      borderStyle: 'dashed',
+    },
     mvpAvatar: { width: 36, height: 36, borderRadius: 18 },
-    mvpName: { flex: 1, fontSize: 14, color: theme.text },
+    mvpInfo: { flex: 1, gap: 2 },
+    mvpName: { fontSize: 14, fontWeight: '600', color: theme.text },
+    mvpRole: { fontSize: 12, color: theme.textMuted },
+    mvpRoleGk: { color: theme.primary, fontWeight: '600' },
   })
 }

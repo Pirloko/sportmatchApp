@@ -227,7 +227,7 @@ export interface MatchOpportunity {
   gender: Gender
   status: MatchStatus
   createdAt: Date
-  /** Cuando el organizador cerró el partido (inicio ventana 48 h para calificar). */
+  /** Cuando el organizador cerró el partido (inicio ventana 24 h: reseñas + chat). */
   finalizedAt?: Date
   rivalResult?: RivalResult
   /** Partidos players/open: marcado como jugado sin marcador de equipos. */

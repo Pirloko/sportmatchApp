@@ -676,7 +676,7 @@ export function ProfileScreen() {
                       icon: 'ribbon' as const,
                       value: profileStats.mvpWins,
                       label: 'MVP',
-                      hint: 'Partidos como MVP',
+                      hint: 'Partidos como MVP (empates incluidos)',
                     },
                     {
                       icon: 'people' as const,

@@ -505,7 +505,15 @@ export function ChatScreen() {
     if (error) {
       setMessages((p) => p.filter((m) => m.id !== tempId))
       setNewMessage(trimmed)
-      Alert.alert('Error', error.message)
+      const chatClosedByPolicy =
+        error.code === '42501' ||
+        /row-level security|policy/i.test(error.message)
+      Alert.alert(
+        chatClosedByPolicy ? 'Chat cerrado' : 'Error',
+        chatClosedByPolicy
+          ? 'Pasaron las 24 h desde que se finalizó el partido.'
+          : error.message
+      )
       setIsSending(false)
       return
     }
@@ -734,7 +742,7 @@ export function ChatScreen() {
                 </Text>
               ) : opportunity.status === 'completed' && opportunity.finalizedAt ? (
                 <Text style={styles.closedText}>
-                  Chat cerrado: pasaron las 48 h tras finalizar el partido. Puedes
+                  Chat cerrado: pasaron las 24 h tras finalizar el partido. Puedes
                   leer el historial arriba.
                 </Text>
               ) : (

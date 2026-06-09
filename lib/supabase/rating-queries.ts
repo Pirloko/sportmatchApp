@@ -45,9 +45,11 @@ export type MatchDetailRatingsBundle = {
   myRating: MatchOpportunityRatingRow | null
 }
 
-/** Ventana de 48 h desde finalized_at — solo chat post-partido. */
+/** Ventana post-partido (reseñas + chat): 24 h desde finalized_at. */
+export const MATCH_POST_FINALIZE_WINDOW_MS = 24 * 60 * 60 * 1000
+
 export function getRatingDeadline(finalizedAt: Date): Date {
-  return new Date(finalizedAt.getTime() + 48 * 60 * 60 * 1000)
+  return new Date(finalizedAt.getTime() + MATCH_POST_FINALIZE_WINDOW_MS)
 }
 
 export function isRatingWindowOpen(finalizedAt: Date | undefined): boolean {
@@ -59,7 +61,7 @@ export function isRatingWindowOpen(finalizedAt: Date | undefined): boolean {
  * ¿Se pueden enviar mensajes en el chat del partido?
  * - Partidos no finalizados: sí.
  * - Cancelados: no.
- * - Finalizados: solo durante 48 h posteriores a `finalizedAt`.
+ * - Finalizados: solo durante 24 h posteriores a `finalizedAt`.
  */
 export function isMatchChatMessagingOpen(opp: {
   status: string
@@ -93,6 +95,15 @@ export function tallyMvpVotes(
   return [...counts.entries()]
     .map(([userId, votes]) => ({ userId, votes }))
     .sort((a, b) => b.votes - a.votes)
+}
+
+/** MVP(s) del partido: todos los que empatan en el máximo de votos. */
+export function getMvpWinnersFromTally(
+  tally: { userId: string; votes: number }[]
+): { userId: string; votes: number }[] {
+  if (tally.length === 0) return []
+  const maxVotes = tally[0].votes
+  return tally.filter((entry) => entry.votes === maxVotes)
 }
 
 function buildSummary(
