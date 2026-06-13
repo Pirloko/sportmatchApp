@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "410161376497",
+    "project_id": "sportmatch-d0552",
+    "storage_bucket": "sportmatch-d0552.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:410161376497:android:4355a5e14b6378d1708d50",
+        "android_client_info": {
+          "package_name": "com.pichanga.expo"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyAf3RWlma122p6GFmkr7osxKg1VhBmJRXo"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

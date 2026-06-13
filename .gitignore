@@ -44,3 +44,7 @@ yarn-error.*
 # local build artifacts
 build-*.apk
 *.aab
+
+# Firebase service account (privado; subir solo a EAS Credentials)
+*-firebase-adminsdk-*.json
+firebase-service-account.json

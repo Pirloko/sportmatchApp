@@ -1,7 +1,8 @@
 import { forwardRef } from 'react'
 import { Image, StyleSheet, Text, View } from 'react-native'
 
-import { APP_LOGO } from '../lib/app-brand-assets'
+import { SPORTMATCH_SHARE_LOGO } from '../lib/app-brand-assets'
+import { positionLabel } from '../lib/player-profile-ui'
 
 export type ProfileShareTeamEntry = {
   id: string
@@ -13,6 +14,8 @@ export type ProfileShareTeamEntry = {
 export type ProfileShareCardData = {
   name: string
   photoUri: string
+  position?: string
+  city?: string
   playerWins: number
   playerDraws: number
   playerLosses: number
@@ -28,472 +31,521 @@ type Props = {
 
 const CARD_W = 360
 const CARD_H = 640
-const PAD = 18
-const STAT_GAP = 7
-const STAT_W = (CARD_W - PAD * 2 - STAT_GAP) / 2
 
-const STATS: Array<{
-  key: keyof Pick<
-    ProfileShareCardData,
-    'playerWins' | 'playerDraws' | 'playerLosses' | 'mvpWins'
-  >
-  full: string
-  emoji: string
-  accent: string
-  bg: string
-}> = [
-  { key: 'playerWins', full: 'Victorias', emoji: '🏆', accent: '#4ade80', bg: 'rgba(34,197,94,0.18)' },
-  { key: 'playerDraws', full: 'Empates', emoji: '🤝', accent: '#fbbf24', bg: 'rgba(251,191,36,0.16)' },
-  { key: 'playerLosses', full: 'Derrotas', emoji: '📉', accent: '#f87171', bg: 'rgba(239,68,68,0.16)' },
-  { key: 'mvpWins', full: 'MVP', emoji: '⭐', accent: '#fde047', bg: 'rgba(253,224,71,0.2)' },
-]
+const C = {
+  frame: '#D4AF37',
+  frameInner: '#F0D878',
+  sky: '#45C9BE',
+  skyDeep: '#2BA89E',
+  skyLight: '#6AD4CC',
+  ink: '#0B2E34',
+  panel: '#123A42',
+  panelDeep: '#0A252B',
+  gold: '#F5C518',
+  coral: '#E84855',
+  white: '#FFFFFF',
+  cream: '#F7F3E8',
+  muted: 'rgba(255,255,255,0.68)',
+  faint: 'rgba(255,255,255,0.38)',
+}
 
-/** Tarjeta 9:16 — layout fijo; equipos siempre visibles. */
+const FADE_STOPS = [0.04, 0.1, 0.18, 0.28, 0.42, 0.58, 0.76, 0.92]
+
+/** Tarjeta 9:16 — cromo coleccionable premium (referencia WC / Panini). */
 export const ProfileShareCard = forwardRef<View, Props>(function ProfileShareCard(
   { data },
   ref
 ) {
-  const teamCount = data.teams.length
-  const visibleTeams = data.teams.slice(0, teamCount <= 2 ? teamCount : 2)
-  const extraTeams = data.teams.length - visibleTeams.length
-  const singleTeam = teamCount === 1 ? data.teams[0] : null
+  const primaryTeam = data.teams[0] ?? null
+  const positionText = data.position ? positionLabel(data.position).toUpperCase() : null
+  const cityText = data.city?.trim().toUpperCase() ?? null
 
   return (
-    <View ref={ref} style={styles.card} collapsable={false}>
-      <View style={styles.bgTop} />
-      <View style={styles.bgBottom} />
+    <View ref={ref} style={styles.outerFrame} collapsable={false}>
+      <View style={styles.card}>
+        <View style={styles.skyLayer} />
+        <View style={styles.skyGlowLeft} />
+        <View style={styles.skyGlowRight} />
 
-      {/* ── Cabecera compacta ── */}
-      <View style={styles.headerRow}>
-        <View style={styles.logoWrap}>
-          <Image source={APP_LOGO} style={styles.logo} resizeMode="contain" />
-        </View>
-        <View style={styles.headerTextCol}>
-          <Text style={styles.brandName}>SportMatch</Text>
-          <Text style={styles.kicker}>Mi ficha de jugador</Text>
-        </View>
-      </View>
-
-      {/* ── Jugador ── */}
-      <View style={styles.playerRow}>
-        <View style={styles.avatarOuter}>
-          <Image source={{ uri: data.photoUri }} style={styles.avatar} />
-        </View>
-        <Text style={styles.playerName} numberOfLines={2}>
-          {data.name}
-        </Text>
-      </View>
-
-      {/* ── Stats 3×2 compacto ── */}
-      <View style={styles.statsBlock}>
-        <Text style={styles.sectionLabel}>Rendimiento</Text>
-        <View style={styles.statsGrid}>
-          {STATS.map((s) => (
-            <View
-              key={s.key}
-              style={[
-                styles.statCell,
-                { backgroundColor: s.bg },
-                s.key === 'mvpWins' && styles.statCellMvp,
-              ]}
-            >
-              <Text style={styles.statEmoji}>{s.emoji}</Text>
-              <Text style={[styles.statNum, { color: s.accent }]}>{data[s.key]}</Text>
-              <Text style={styles.statTag}>{s.full}</Text>
-            </View>
+        <View style={styles.patternRow}>
+          {[0, 1, 2, 3, 4, 5].map((i) => (
+            <View key={i} style={styles.patternStripe} />
           ))}
         </View>
-      </View>
 
-      {/* ── Equipos: ocupa el espacio restante ── */}
-      <View style={styles.teamsBlock}>
-        <Text style={styles.sectionLabel}>Mis equipos</Text>
-        <View style={[styles.teamsBody, teamCount <= 1 && styles.teamsBodySingle]}>
-          {teamCount === 0 ? (
-            <Text style={styles.teamsEmpty}>Sin equipos aún</Text>
-          ) : singleTeam ? (
-            <View style={styles.teamHero}>
-              <View style={styles.teamHeroAccent} />
-              {singleTeam.logoUri ? (
-                <Image source={{ uri: singleTeam.logoUri }} style={styles.teamHeroLogo} />
-              ) : (
-                <View style={styles.teamHeroLogoFallback}>
-                  <Text style={styles.teamHeroInitial}>
-                    {teamInitial(singleTeam.name)}
-                  </Text>
+        <Text style={styles.bgNumTwo} pointerEvents="none">
+          2
+        </Text>
+        <Text style={styles.bgNumSix} pointerEvents="none">
+          6
+        </Text>
+
+        <View style={styles.topBar}>
+          <View style={styles.editionBadge}>
+            <Text style={styles.editionKicker}>SportMatch</Text>
+            <Text style={styles.editionTitle}>EDICIÓN COLECCIONISTA</Text>
+          </View>
+          <Image
+            source={SPORTMATCH_SHARE_LOGO}
+            style={styles.topLogo}
+            resizeMode="contain"
+          />
+        </View>
+
+        <View style={styles.heroStage}>
+          <View style={styles.heroRing} />
+          <Image source={{ uri: data.photoUri }} style={styles.heroPhoto} />
+          <View style={styles.heroFade}>
+            {FADE_STOPS.map((opacity, index) => (
+              <View
+                key={index}
+                style={[
+                  styles.heroFadeSlice,
+                  { backgroundColor: `rgba(10, 37, 43, ${opacity})` },
+                ]}
+              />
+            ))}
+          </View>
+        </View>
+
+        <View style={styles.infoPanel}>
+          <View style={styles.panelSheen} />
+          <View style={styles.goldRule} />
+
+          <View style={styles.identityBlock}>
+            <Text style={styles.playerName} numberOfLines={1}>
+              {data.name.toUpperCase()}
+            </Text>
+            <View style={styles.metaRow}>
+              {positionText ? (
+                <View style={styles.positionBadge}>
+                  <Text style={styles.positionBadgeText}>{positionText}</Text>
                 </View>
-              )}
-              <View style={styles.teamHeroMeta}>
-                <Text style={styles.teamHeroName} numberOfLines={2}>
-                  {singleTeam.name}
-                </Text>
-                <Text style={styles.teamHeroRole} numberOfLines={2}>
-                  {singleTeam.roleLine}
-                </Text>
-              </View>
-              <View style={styles.activePill}>
-                <Text style={styles.activePillText}>ACTIVO</Text>
-              </View>
+              ) : null}
+              {cityText ? <Text style={styles.cityText}>{cityText}</Text> : null}
             </View>
-          ) : (
-            <View style={styles.teamsList}>
-              {visibleTeams.map((team) => (
-                <TeamRow key={team.id} team={team} compact />
-              ))}
-              {extraTeams > 0 ? (
-                <Text style={styles.teamsMore}>+{extraTeams} equipos más</Text>
+          </View>
+
+          <View style={styles.statsBar}>
+            <StatCell label="VIC" value={data.playerWins} accent={C.gold} />
+            <View style={styles.statDivider} />
+            <StatCell label="EMP" value={data.playerDraws} accent="#FBBF24" />
+            <View style={styles.statDivider} />
+            <StatCell label="DER" value={data.playerLosses} accent="#F87171" />
+            <View style={styles.statDivider} />
+            <StatCell label="MVP" value={data.mvpWins} accent="#FDE047" highlight />
+          </View>
+
+          <View style={styles.teamCard}>
+            {primaryTeam?.logoUri ? (
+              <Image source={{ uri: primaryTeam.logoUri }} style={styles.teamLogo} />
+            ) : primaryTeam ? (
+              <View style={styles.teamLogoFallback}>
+                <Text style={styles.teamLogoInitial}>
+                  {(primaryTeam.name.trim()[0] ?? '?').toUpperCase()}
+                </Text>
+              </View>
+            ) : (
+              <View style={styles.teamLogoFallback}>
+                <Text style={styles.teamLogoInitial}>—</Text>
+              </View>
+            )}
+            <View style={styles.teamCopy}>
+              <Text style={styles.teamKicker}>CLUB</Text>
+              <Text style={styles.teamName} numberOfLines={1}>
+                {primaryTeam?.name.toUpperCase() ?? 'SIN EQUIPO'}
+              </Text>
+              {primaryTeam?.roleLine ? (
+                <Text style={styles.teamRole} numberOfLines={1}>
+                  {primaryTeam.roleLine}
+                </Text>
               ) : null}
             </View>
-          )}
+          </View>
+
+          <View style={styles.footerStrip}>
+            <View style={styles.footerBrand}>
+              <Image
+                source={SPORTMATCH_SHARE_LOGO}
+                style={styles.footerLogo}
+                resizeMode="contain"
+              />
+              <View>
+                <Text style={styles.footerBrandName}>SPORTMATCH</Text>
+                <Text style={styles.footerUrl}>sportmatch.cl</Text>
+              </View>
+            </View>
+            <View style={styles.rarityTag}>
+              <Text style={styles.rarityTagText}>✓ VERIFICADO</Text>
+            </View>
+          </View>
         </View>
       </View>
-
-      <Text style={styles.footer}>sportmatch.cl</Text>
     </View>
   )
 })
 
-function TeamRow({ team, compact }: { team: ProfileShareTeamEntry; compact?: boolean }) {
+function StatCell({
+  label,
+  value,
+  accent,
+  highlight,
+}: {
+  label: string
+  value: number
+  accent: string
+  highlight?: boolean
+}) {
   return (
-    <View style={[styles.teamRow, compact && styles.teamRowCompact]}>
-      {team.logoUri ? (
-        <Image source={{ uri: team.logoUri }} style={styles.teamRowLogo} />
-      ) : (
-        <View style={styles.teamRowLogoFallback}>
-          <Text style={styles.teamRowInitial}>{teamInitial(team.name)}</Text>
-        </View>
-      )}
-      <View style={styles.teamRowMeta}>
-        <Text style={styles.teamRowName} numberOfLines={1}>
-          {team.name}
-        </Text>
-        <Text style={styles.teamRowRole} numberOfLines={1}>
-          {team.roleLine}
-        </Text>
-      </View>
-      <View style={styles.activePillSmall}>
-        <Text style={styles.activePillTextSmall}>ACTIVO</Text>
-      </View>
+    <View style={[styles.statCell, highlight && styles.statCellHighlight]}>
+      <Text style={[styles.statValue, { color: accent }]}>{value}</Text>
+      <Text style={styles.statLabel}>{label}</Text>
     </View>
   )
 }
 
-function teamInitial(name: string): string {
-  return (name.trim()[0] ?? '?').toUpperCase()
-}
-
 const styles = StyleSheet.create({
-  card: {
+  outerFrame: {
     width: CARD_W,
     height: CARD_H,
-    flexDirection: 'column',
-    backgroundColor: '#051510',
-    borderRadius: 22,
-    paddingHorizontal: PAD,
-    paddingTop: 16,
-    paddingBottom: 14,
-    borderWidth: 1,
-    borderColor: 'rgba(74, 222, 128, 0.15)',
+    borderRadius: 24,
+    padding: 4,
+    backgroundColor: C.frame,
   },
-  bgTop: {
+  card: {
+    flex: 1,
+    borderRadius: 20,
+    overflow: 'hidden',
+    backgroundColor: C.sky,
+    borderWidth: 1.5,
+    borderColor: C.frameInner,
+  },
+  skyLayer: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: C.skyDeep,
+    opacity: 0.28,
+  },
+  skyGlowLeft: {
     position: 'absolute',
-    top: -40,
-    right: -30,
+    top: 80,
+    left: -40,
     width: 180,
     height: 180,
     borderRadius: 90,
-    backgroundColor: 'rgba(34, 197, 94, 0.08)',
+    backgroundColor: C.skyLight,
+    opacity: 0.22,
   },
-  bgBottom: {
+  skyGlowRight: {
     position: 'absolute',
-    bottom: 60,
-    left: -50,
-    width: 160,
-    height: 160,
-    borderRadius: 80,
-    backgroundColor: 'rgba(16, 185, 129, 0.06)',
+    top: 120,
+    right: -50,
+    width: 200,
+    height: 200,
+    borderRadius: 100,
+    backgroundColor: C.white,
+    opacity: 0.1,
   },
-
-  headerRow: {
+  patternRow: {
+    position: 'absolute',
+    top: 54,
+    left: -20,
+    right: -20,
     flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-    marginBottom: 14,
-    zIndex: 1,
+    justifyContent: 'space-between',
+    transform: [{ rotate: '-8deg' }],
+    opacity: 0.08,
   },
-  logoWrap: {
-    width: 48,
-    height: 48,
-    borderRadius: 14,
-    backgroundColor: 'rgba(255,255,255,0.06)',
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.1)',
+  patternStripe: {
+    width: 18,
+    height: 220,
+    backgroundColor: C.white,
+    borderRadius: 9,
   },
-  logo: { width: 38, height: 38 },
-  headerTextCol: { flex: 1 },
-  brandName: {
-    color: '#ffffff',
-    fontSize: 17,
-    fontWeight: '800',
-    letterSpacing: -0.3,
+  bgNumTwo: {
+    position: 'absolute',
+    left: -18,
+    top: 108,
+    fontSize: 210,
+    fontWeight: '900',
+    color: C.gold,
+    opacity: 0.34,
+    lineHeight: 210,
+    letterSpacing: -6,
   },
-  kicker: {
-    color: 'rgba(255,255,255,0.5)',
+  bgNumSix: {
+    position: 'absolute',
+    right: -24,
+    top: 148,
+    fontSize: 240,
+    fontWeight: '900',
+    color: C.coral,
+    opacity: 0.3,
+    lineHeight: 240,
+    letterSpacing: -8,
+  },
+  topBar: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    justifyContent: 'space-between',
+    paddingHorizontal: 14,
+    paddingTop: 12,
+    zIndex: 4,
+  },
+  editionBadge: {
+    paddingTop: 2,
+    maxWidth: CARD_W * 0.55,
+  },
+  editionKicker: {
+    color: C.ink,
     fontSize: 10,
-    fontWeight: '600',
+    fontWeight: '900',
+    letterSpacing: 2.2,
+    opacity: 0.72,
+  },
+  editionTitle: {
+    color: C.white,
+    fontSize: 11,
+    fontWeight: '900',
     letterSpacing: 1.1,
-    textTransform: 'uppercase',
-    marginTop: 2,
+    marginTop: 3,
+    textShadowColor: 'rgba(0,0,0,0.18)',
+    textShadowOffset: { width: 0, height: 1 },
+    textShadowRadius: 2,
   },
-
-  playerRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 14,
-    marginBottom: 14,
-    zIndex: 1,
+  topLogo: {
+    width: 72,
+    height: 72,
   },
-  avatarOuter: {
-    width: 64,
-    height: 64,
-    borderRadius: 32,
-    borderWidth: 2,
-    borderColor: 'rgba(74, 222, 128, 0.6)',
-    padding: 2,
-    backgroundColor: '#051510',
-  },
-  avatar: {
-    width: '100%',
-    height: '100%',
-    borderRadius: 30,
-  },
-  playerName: {
+  heroStage: {
     flex: 1,
-    color: '#ffffff',
-    fontSize: 24,
-    fontWeight: '800',
-    letterSpacing: -0.4,
-    lineHeight: 28,
-  },
-
-  statsBlock: {
-    marginBottom: 12,
-    zIndex: 1,
-  },
-  sectionLabel: {
-    color: 'rgba(255,255,255,0.45)',
-    fontSize: 9,
-    fontWeight: '700',
-    letterSpacing: 1.5,
-    textTransform: 'uppercase',
-    marginBottom: 8,
-  },
-  statsGrid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: STAT_GAP,
-  },
-  statCell: {
-    width: STAT_W,
-    height: 64,
-    borderRadius: 12,
     alignItems: 'center',
-    justifyContent: 'center',
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.06)',
+    justifyContent: 'flex-end',
+    marginTop: 4,
+    zIndex: 2,
   },
-  statCellMvp: {
-    borderColor: 'rgba(253, 224, 71, 0.45)',
+  heroRing: {
+    position: 'absolute',
+    bottom: 8,
+    width: CARD_W * 0.78,
+    height: CARD_W * 0.78,
+    borderRadius: CARD_W * 0.39,
+    borderWidth: 3,
+    borderColor: 'rgba(255,255,255,0.22)',
+    backgroundColor: 'rgba(255,255,255,0.06)',
   },
-  statEmoji: { fontSize: 11, lineHeight: 13 },
-  statNum: {
-    fontSize: 18,
-    fontWeight: '800',
-    lineHeight: 22,
-    marginTop: 1,
+  heroPhoto: {
+    width: CARD_W * 0.92,
+    height: CARD_H * 0.5,
+    resizeMode: 'cover',
+    marginBottom: -18,
   },
-  statTag: {
-    color: 'rgba(255,255,255,0.65)',
-    fontSize: 7,
-    fontWeight: '700',
-    letterSpacing: 0.3,
-    marginTop: 1,
-  },
-
-  teamsBlock: {
-    flex: 1,
-    zIndex: 1,
-    minHeight: 120,
-  },
-  teamsBody: {
-    flex: 1,
-    justifyContent: 'flex-start',
-  },
-  teamsBodySingle: {
-    justifyContent: 'center',
-  },
-  teamsEmpty: {
-    color: 'rgba(255,255,255,0.4)',
-    fontSize: 13,
-    textAlign: 'center',
-    fontWeight: '600',
-    paddingVertical: 20,
-  },
-
-  teamHero: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 14,
-    backgroundColor: 'rgba(255,255,255,0.05)',
-    borderRadius: 16,
-    paddingVertical: 18,
-    paddingHorizontal: 16,
-    paddingLeft: 18,
-    borderWidth: 1,
-    borderColor: 'rgba(74, 222, 128, 0.2)',
-    overflow: 'hidden',
-    minHeight: 96,
-  },
-  teamHeroAccent: {
+  heroFade: {
     position: 'absolute',
     left: 0,
+    right: 0,
+    bottom: -18,
+    height: 120,
+    flexDirection: 'column',
+  },
+  heroFadeSlice: {
+    flex: 1,
+  },
+  infoPanel: {
+    backgroundColor: C.panel,
+    paddingHorizontal: 14,
+    paddingTop: 16,
+    paddingBottom: 10,
+    borderTopWidth: 2,
+    borderTopColor: 'rgba(255,255,255,0.12)',
+    zIndex: 3,
+  },
+  panelSheen: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: C.panelDeep,
+    opacity: 0.42,
+  },
+  goldRule: {
+    position: 'absolute',
     top: 0,
-    bottom: 0,
-    width: 4,
-    backgroundColor: '#22c55e',
+    left: 18,
+    right: 18,
+    height: 3,
+    borderRadius: 2,
+    backgroundColor: C.gold,
   },
-  teamHeroLogo: {
-    width: 56,
-    height: 56,
-    borderRadius: 14,
-    backgroundColor: 'rgba(255,255,255,0.08)',
+  identityBlock: {
+    marginBottom: 12,
   },
-  teamHeroLogoFallback: {
-    width: 56,
-    height: 56,
+  playerName: {
+    color: C.white,
+    fontSize: 30,
+    fontWeight: '900',
+    letterSpacing: 1.2,
+    lineHeight: 34,
+  },
+  metaRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flexWrap: 'wrap',
+    gap: 8,
+    marginTop: 8,
+  },
+  positionBadge: {
+    backgroundColor: C.gold,
+    borderRadius: 999,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+  },
+  positionBadgeText: {
+    color: C.ink,
+    fontSize: 10,
+    fontWeight: '900',
+    letterSpacing: 0.8,
+  },
+  cityText: {
+    color: C.muted,
+    fontSize: 11,
+    fontWeight: '700',
+    letterSpacing: 1.4,
+  },
+  statsBar: {
+    flexDirection: 'row',
+    alignItems: 'stretch',
+    backgroundColor: 'rgba(255,255,255,0.06)',
     borderRadius: 14,
-    backgroundColor: 'rgba(34, 197, 94, 0.25)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.1)',
+    overflow: 'hidden',
+    marginBottom: 10,
+  },
+  statCell: {
+    flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.15)',
+    paddingVertical: 10,
   },
-  teamHeroInitial: {
-    color: '#fff',
+  statCellHighlight: {
+    backgroundColor: 'rgba(253, 224, 71, 0.08)',
+  },
+  statValue: {
     fontSize: 22,
+    fontWeight: '900',
+    lineHeight: 24,
+    color: C.white,
+  },
+  statLabel: {
+    color: C.faint,
+    fontSize: 8,
     fontWeight: '800',
+    letterSpacing: 1,
+    marginTop: 3,
   },
-  teamHeroMeta: {
-    flex: 1,
-    minWidth: 0,
-    paddingRight: 4,
+  statDivider: {
+    width: 1,
+    backgroundColor: 'rgba(255,255,255,0.1)',
+    marginVertical: 8,
   },
-  teamHeroName: {
-    color: '#ffffff',
-    fontSize: 17,
-    fontWeight: '800',
-    letterSpacing: -0.2,
-    lineHeight: 21,
-  },
-  teamHeroRole: {
-    color: 'rgba(255,255,255,0.55)',
-    fontSize: 12,
-    fontWeight: '500',
-    marginTop: 4,
-    lineHeight: 16,
-  },
-  activePill: {
-    backgroundColor: 'rgba(34, 197, 94, 0.2)',
-    borderRadius: 10,
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-    borderWidth: 1,
-    borderColor: 'rgba(74, 222, 128, 0.4)',
-  },
-  activePillText: {
-    color: '#86efac',
-    fontSize: 9,
-    fontWeight: '800',
-    letterSpacing: 0.6,
-  },
-
-  teamsList: { gap: 8 },
-  teamRow: {
+  teamCard: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 12,
-    backgroundColor: 'rgba(255,255,255,0.04)',
+    backgroundColor: 'rgba(255,255,255,0.05)',
     borderRadius: 14,
-    paddingVertical: 12,
-    paddingHorizontal: 14,
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.07)',
-  },
-  teamRowCompact: {
+    paddingHorizontal: 10,
     paddingVertical: 10,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.08)',
+    marginBottom: 10,
   },
-  teamRowLogo: {
-    width: 44,
-    height: 44,
+  teamLogo: {
+    width: 46,
+    height: 46,
     borderRadius: 12,
-    backgroundColor: 'rgba(255,255,255,0.06)',
+    backgroundColor: C.cream,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.2)',
   },
-  teamRowLogoFallback: {
-    width: 44,
-    height: 44,
+  teamLogoFallback: {
+    width: 46,
+    height: 46,
     borderRadius: 12,
-    backgroundColor: 'rgba(34, 197, 94, 0.22)',
+    backgroundColor: 'rgba(255,255,255,0.1)',
     alignItems: 'center',
     justifyContent: 'center',
-  },
-  teamRowInitial: {
-    color: '#fff',
-    fontSize: 18,
-    fontWeight: '800',
-  },
-  teamRowMeta: { flex: 1, minWidth: 0 },
-  teamRowName: {
-    color: '#fff',
-    fontSize: 14,
-    fontWeight: '700',
-  },
-  teamRowRole: {
-    color: 'rgba(255,255,255,0.5)',
-    fontSize: 11,
-    marginTop: 2,
-  },
-  activePillSmall: {
-    backgroundColor: 'rgba(34, 197, 94, 0.18)',
-    borderRadius: 8,
-    paddingHorizontal: 8,
-    paddingVertical: 4,
     borderWidth: 1,
-    borderColor: 'rgba(74, 222, 128, 0.35)',
+    borderColor: 'rgba(255,255,255,0.12)',
   },
-  activePillTextSmall: {
-    color: '#86efac',
+  teamLogoInitial: {
+    color: C.white,
+    fontSize: 18,
+    fontWeight: '900',
+  },
+  teamCopy: {
+    flex: 1,
+    minWidth: 0,
+  },
+  teamKicker: {
+    color: C.faint,
     fontSize: 8,
     fontWeight: '800',
+    letterSpacing: 1.4,
+    marginBottom: 2,
+  },
+  teamName: {
+    color: C.white,
+    fontSize: 13,
+    fontWeight: '900',
     letterSpacing: 0.4,
   },
-  teamsMore: {
-    color: 'rgba(255,255,255,0.45)',
-    fontSize: 11,
-    textAlign: 'center',
-    fontWeight: '600',
-    marginTop: 4,
-  },
-
-  footer: {
-    color: 'rgba(255,255,255,0.32)',
+  teamRole: {
+    color: C.muted,
     fontSize: 10,
     fontWeight: '600',
-    textAlign: 'center',
+    marginTop: 2,
+  },
+  footerStrip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: C.cream,
+    borderRadius: 12,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+  },
+  footerBrand: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    flex: 1,
+  },
+  footerLogo: {
+    width: 36,
+    height: 36,
+  },
+  footerBrandName: {
+    color: C.ink,
+    fontSize: 11,
+    fontWeight: '900',
+    letterSpacing: 1.1,
+  },
+  footerUrl: {
+    color: 'rgba(11,46,52,0.55)',
+    fontSize: 9,
+    fontWeight: '700',
+    letterSpacing: 0.4,
+    marginTop: 1,
+  },
+  rarityTag: {
+    backgroundColor: C.ink,
+    borderRadius: 999,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+  },
+  rarityTagText: {
+    color: C.gold,
+    fontSize: 9,
+    fontWeight: '900',
     letterSpacing: 0.8,
-    marginTop: 10,
-    zIndex: 1,
   },
 })
 

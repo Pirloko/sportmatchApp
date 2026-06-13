@@ -313,6 +313,8 @@ export function ProfileScreen() {
     return {
       name: currentUser.name,
       photoUri: currentUser.photo || DEFAULT_AVATAR,
+      position: currentUser.position,
+      city: currentUser.city,
       playerWins: profileStats.playerWins,
       playerDraws: profileStats.playerDraws,
       playerLosses: profileStats.playerLosses,

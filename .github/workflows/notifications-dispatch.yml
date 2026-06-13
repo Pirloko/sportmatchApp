@@ -1,0 +1,37 @@
+# Despacha push Expo para la app móvil (chat, invitaciones, reseñas, recordatorio 2h).
+# Secrets en GitHub → Settings → Secrets and variables → Actions:
+#   SUPABASE_URL
+#   SUPABASE_SERVICE_ROLE_KEY
+#
+# No activar a la vez con el cron web /api/cron/notifications/push-dispatch (mismo push_sent_at).
+
+name: Notifications dispatch
+
+on:
+  schedule:
+    # Cada 10 minutos (UTC)
+    - cron: '*/10 * * * *'
+  workflow_dispatch:
+
+jobs:
+  dispatch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run notifications dispatch
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: npm run notifications:dispatch
