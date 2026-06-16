@@ -17,8 +17,6 @@ jobs:
   dispatch:
     runs-on: ubuntu-latest
     timeout-minutes: 5
-    # Evita fallos y emails diarios hasta configurar secrets en GitHub Actions.
-    if: ${{ secrets.SUPABASE_URL != '' && secrets.SUPABASE_SERVICE_ROLE_KEY != '' }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -36,4 +34,9 @@ jobs:
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
-        run: npm run notifications:dispatch
+        run: |
+          if [ -z "$SUPABASE_URL" ] || [ -z "$SUPABASE_SERVICE_ROLE_KEY" ]; then
+            echo "Skipping: configure SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY in GitHub Actions secrets."
+            exit 0
+          fi
+          npm run notifications:dispatch
