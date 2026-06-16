@@ -28,6 +28,10 @@ import {
   resolveTeamLogoDisplayUrl,
 } from '../lib/supabase/team-logos'
 import type { Level } from '../lib/types'
+import { AppFeedbackModal } from './app-feedback-modal'
+import { SettingsAboutPanel } from './settings-about-panel'
+import { SettingsAppearancePanel } from './settings-appearance-panel'
+import { SettingsNotificationsPanel } from './settings-notifications-panel'
 import { ProfileShareCard, type ProfileShareCardData } from './profile-share-card'
 
 const DAY_ORDER = [
@@ -221,6 +225,7 @@ export function ProfileScreen() {
   const styles = useMemo(() => createStyles(theme), [theme])
 
   const [settingsOpen, setSettingsOpen] = useState(false)
+  const [feedbackOpen, setFeedbackOpen] = useState(false)
   const [photoWorking, setPhotoWorking] = useState(false)
   const [photoPreviewUri, setPhotoPreviewUri] = useState<string | null>(null)
   const [deleteBusy, setDeleteBusy] = useState(false)
@@ -329,8 +334,11 @@ export function ProfileScreen() {
     if (!shareCardData || sharingProfile) return
     setSharingProfile(true)
     try {
-      await new Promise((resolve) => setTimeout(resolve, 500))
-      const res = await captureAndShareProfileCard(shareCardRef)
+      const prefetchUris = [
+        shareCardData.photoUri,
+        ...shareCardData.teams.map((t) => t.logoUri),
+      ].filter((u): u is string => Boolean(u?.trim()))
+      const res = await captureAndShareProfileCard(shareCardRef, { prefetchUris })
       if (!res.ok) {
         Alert.alert('No se pudo compartir', res.error)
       }
@@ -903,7 +911,10 @@ export function ProfileScreen() {
               styles.menuRow,
               { backgroundColor: theme.card, borderColor: theme.border },
             ]}
-            onPress={openProfileEditor}
+            onPress={() => {
+              openProfileEditor()
+              router.push('/')
+            }}
           >
             <View
               style={[
@@ -936,7 +947,7 @@ export function ProfileScreen() {
               styles.menuRow,
               { backgroundColor: theme.card, borderColor: theme.border },
             ]}
-            onPress={() => router.push('/equipos')}
+            onPress={() => setFeedbackOpen(true)}
           >
             <View
               style={[
@@ -948,17 +959,17 @@ export function ProfileScreen() {
               ]}
             >
               <Ionicons
-                name="people-outline"
+                name="chatbubble-ellipses-outline"
                 size={22}
                 color={theme.textMuted}
               />
             </View>
             <View style={styles.menuText}>
               <Text style={[styles.menuTitle, { color: theme.text }]}>
-                Mis equipos
+                Sugerencias, opiniones, errores
               </Text>
               <Text style={[styles.menuSub, { color: theme.textMuted }]}>
-                Crear o gestionar equipos
+                Envía comentarios al equipo SportMatch
               </Text>
             </View>
             <Ionicons name="chevron-forward" size={20} color={theme.textMuted} />
@@ -1058,6 +1069,13 @@ export function ProfileScreen() {
         </View>
       ) : null}
 
+      <AppFeedbackModal
+        visible={feedbackOpen}
+        userId={currentUser?.id}
+        theme={theme}
+        onClose={() => setFeedbackOpen(false)}
+      />
+
       <Modal
         visible={settingsOpen}
         animationType="slide"
@@ -1101,9 +1119,7 @@ export function ProfileScreen() {
               <Text style={[styles.settingHead, { color: theme.text }]}>
                 Apariencia
               </Text>
-              <Text style={[styles.settingBody, { color: theme.textMuted }]}>
-                Tema claro / oscuro: próximamente (Bloque 17).
-              </Text>
+              <SettingsAppearancePanel theme={theme} />
             </View>
             <View
               style={[
@@ -1118,9 +1134,11 @@ export function ProfileScreen() {
               <Text style={[styles.settingHead, { color: theme.text }]}>
                 Notificaciones
               </Text>
-              <Text style={[styles.settingBody, { color: theme.textMuted }]}>
-                Próximamente podrás elegir avisos de partidos y mensajes.
-              </Text>
+              <SettingsNotificationsPanel
+                theme={theme}
+                active={settingsOpen}
+                onOpenHistory={() => setSettingsOpen(false)}
+              />
             </View>
             <View
               style={[
@@ -1202,9 +1220,7 @@ export function ProfileScreen() {
               <Text style={[styles.settingHead, { color: theme.text }]}>
                 Acerca de
               </Text>
-              <Text style={[styles.settingBody, { color: theme.textMuted }]}>
-                SportMatch — encuentra rivales, jugadores y revueltas en tu ciudad.
-              </Text>
+              <SettingsAboutPanel theme={theme} />
             </View>
           </ScrollView>
           <Pressable
@@ -1566,7 +1582,7 @@ function createStyles(theme: ReturnType<typeof useScreenTheme>) {
   },
   modalTitle: { fontSize: 20, fontWeight: '800' },
   modalDesc: { fontSize: 14, marginTop: 6, marginBottom: 12 },
-  modalScroll: { maxHeight: 320 },
+  modalScroll: { maxHeight: 480 },
   settingBlock: {
     padding: 14,
     borderRadius: 12,

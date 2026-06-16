@@ -1,4 +1,4 @@
-import type { Team, User } from './types'
+import type { SportsVenue, Team, User } from './types'
 
 export function normalizeLocationKey(v: string | null | undefined): string {
   return (v ?? '')
@@ -25,8 +25,22 @@ export function teamIsInSameCity(user: User, team: Team): boolean {
   return false
 }
 
+/** Centro deportivo en la misma ciudad que el organizador (id o texto normalizado). */
+export function venueIsInSameCity(user: User, venue: SportsVenue): boolean {
+  if (user.cityId && venue.cityId) {
+    return user.cityId === venue.cityId
+  }
+
+  const userCityKey = normalizeLocationKey(user.city)
+  const venueCityKey = normalizeLocationKey(venue.city)
+  if (!userCityKey || !venueCityKey) return false
+  if (userCityKey === venueCityKey) return true
+  if (venueCityKey.includes(userCityKey)) return true
+  if (userCityKey.includes(venueCityKey)) return true
+  return false
+}
+
 /**
- * Geo: sin datos de ubicación en perfil → no se filtra.
  * Con región en perfil → misma región (vía ciudad) o misma ciudad explícita.
  * Sin región pero con ciudad → misma ciudad (id o texto normalizado).
  */

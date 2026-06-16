@@ -16,3 +16,22 @@ export async function fetchPlayerMvpWinsCount(
 
   return typeof data === 'number' ? data : 0
 }
+
+/** Conteo MVP para varios jugadores (p. ej. top del ranking). */
+export async function fetchPlayerMvpWinsCountsBatch(
+  supabase: SupabaseClient,
+  userIds: string[]
+): Promise<Map<string, number>> {
+  const unique = [...new Set(userIds.filter(Boolean))]
+  const map = new Map<string, number>()
+  if (unique.length === 0) return map
+
+  await Promise.all(
+    unique.map(async (userId) => {
+      const count = await fetchPlayerMvpWinsCount(supabase, userId)
+      map.set(userId, count)
+    })
+  )
+
+  return map
+}

@@ -24,6 +24,7 @@ import {
 } from '../lib/ranking'
 import { getSupabase, isSupabaseConfigured } from '../lib/supabase/client'
 import { fetchLastPlayedMaps } from '../lib/supabase/ranking-queries'
+import { fetchPlayerMvpWinsCountsBatch } from '../lib/supabase/mvp-queries'
 import { useThemePreference } from '../lib/theme-context'
 import { useScreenTheme } from '../lib/theme-ui'
 import { BallLoadingIndicator } from './ball-loading-indicator'
@@ -147,12 +148,14 @@ export function RankingScreen() {
   const [refreshing, setRefreshing] = useState(false)
   const [playerLastAt, setPlayerLastAt] = useState<Map<string, Date>>(new Map())
   const [teamLastAt, setTeamLastAt] = useState<Map<string, Date>>(new Map())
+  const [playerMvpCounts, setPlayerMvpCounts] = useState<Map<string, number>>(new Map())
 
   const ui = useMemo(
     () => ({
       statWinBg: theme.statWinBg,
       statDrawBg: theme.statDrawBg,
       statLossBg: theme.statLossBg,
+      statMvpBg: theme.isDark ? 'rgba(253, 224, 71, 0.14)' : '#FEFCE8',
       logoBoxBg: theme.logoBoxBg,
       logoBoxBorder: theme.logoBoxBorder,
       tabInactiveBg: theme.tabInactive,
@@ -162,6 +165,16 @@ export function RankingScreen() {
     }),
     [theme]
   )
+
+  const loadPlayerMvpCounts = useCallback(async (userIds: string[]) => {
+    if (!isSupabaseConfigured() || userIds.length === 0) {
+      setPlayerMvpCounts(new Map())
+      return
+    }
+    const supabase = getSupabase()
+    const map = await fetchPlayerMvpWinsCountsBatch(supabase, userIds)
+    setPlayerMvpCounts(map)
+  }, [])
 
   const loadLastPlayed = useCallback(async () => {
     if (!isSupabaseConfigured()) {
@@ -190,10 +203,18 @@ export function RankingScreen() {
   const onRefresh = useCallback(async () => {
     setRefreshing(true)
     await loadLastPlayed()
+    if (currentUser) {
+      const ids = buildPlayerRankingRows(
+        currentUser,
+        getFilteredUsers(currentUser.gender),
+        playerLastAt
+      ).map((r) => r.id)
+      await loadPlayerMvpCounts(ids)
+    }
     setRefreshing(false)
-  }, [loadLastPlayed])
+  }, [loadLastPlayed, loadPlayerMvpCounts, currentUser, getFilteredUsers, playerLastAt])
 
-  const playerRows = useMemo(() => {
+  const playerRowsBase = useMemo(() => {
     if (!currentUser) return []
     return buildPlayerRankingRows(
       currentUser,
@@ -201,6 +222,19 @@ export function RankingScreen() {
       playerLastAt
     )
   }, [currentUser, getFilteredUsers, playerLastAt])
+
+  useEffect(() => {
+    void loadPlayerMvpCounts(playerRowsBase.map((r) => r.id))
+  }, [playerRowsBase, loadPlayerMvpCounts])
+
+  const playerRows = useMemo(
+    () =>
+      playerRowsBase.map((row) => ({
+        ...row,
+        mvpWins: playerMvpCounts.get(row.id) ?? 0,
+      })),
+    [playerRowsBase, playerMvpCounts]
+  )
 
   const teamRows = useMemo(() => {
     if (!currentUser) return []
@@ -297,11 +331,20 @@ export function RankingScreen() {
             text={tokens.textPrimary}
             muted={tokens.textMuted}
           />
+          <StatCell
+            icon="star"
+            iconColor={ui.accentOnSurface}
+            value={item.mvpWins}
+            label="MVP"
+            bg={ui.statMvpBg}
+            text={tokens.textPrimary}
+            muted={tokens.textMuted}
+          />
         </View>
       </View>
       )
     },
-    [tokens, ui, resolved]
+    [tokens, ui, resolved, theme.primary]
   )
 
   const renderTeamRow: ListRenderItem<TeamRankingRow> = useCallback(
@@ -537,6 +580,7 @@ function StatCell({
   value,
   label,
   pct,
+  subLabel,
   bg,
   text,
   muted,
@@ -545,7 +589,8 @@ function StatCell({
   iconColor: string
   value: number
   label: string
-  pct: number
+  pct?: number
+  subLabel?: string
   bg: string
   text: string
   muted: string
@@ -555,7 +600,11 @@ function StatCell({
       <Ionicons name={icon} size={16} color={iconColor} />
       <Text style={[styles.statValue, { color: text }]}>{value}</Text>
       <Text style={[styles.statLabel, { color: muted }]}>{label}</Text>
-      <Text style={[styles.statPct, { color: iconColor }]}>{pct}%</Text>
+      {pct != null ? (
+        <Text style={[styles.statPct, { color: iconColor }]}>{pct}%</Text>
+      ) : subLabel ? (
+        <Text style={[styles.statPct, { color: iconColor }]}>{subLabel}</Text>
+      ) : null}
     </View>
   )
 }

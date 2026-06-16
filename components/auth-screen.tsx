@@ -279,8 +279,9 @@ export function AuthScreen() {
 
         {isSignUp ? (
           <Text style={[styles.helperText, { color: colors.textMuted }]}>
-            Mínimo 6 caracteres (o el mínimo que definas en Supabase → Authentication →
-            Providers).
+            Mínimo 6 caracteres.{'\n'}
+            Consejo: usa letras, números y un símbolo; evita tu nombre, email o fechas
+            fáciles de adivinar.
           </Text>
         ) : null}
 
@@ -576,7 +577,6 @@ const styles = StyleSheet.create({
     marginBottom: 8,
     fontSize: 12,
     lineHeight: 18,
-    color: '#9CA3A3',
   },
   primary: {
     backgroundColor: '#0F4539',

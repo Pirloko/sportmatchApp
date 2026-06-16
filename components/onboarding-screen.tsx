@@ -2,6 +2,7 @@ import { Ionicons } from '@expo/vector-icons'
 import DateTimePicker from '@react-native-community/datetimepicker'
 import { Image } from 'expo-image'
 import * as ImagePicker from 'expo-image-picker'
+import { router } from 'expo-router'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import {
   ActivityIndicator,
@@ -17,6 +18,7 @@ import {
   TextInput,
   View,
 } from 'react-native'
+import { SafeAreaView } from 'react-native-safe-area-context'
 
 import { takeAndroidPendingImageAsset } from '../lib/android-image-picker-pending'
 import { APP_LOGO } from '../lib/app-brand-assets'
@@ -212,6 +214,11 @@ export function OnboardingScreen() {
 
   const isEditMode = onboardingSource === 'profile_edit'
   const meta = STEP_META[step - 1]
+
+  const cancelProfileEdit = useCallback(() => {
+    exitProfileEditor()
+    router.replace('/perfil')
+  }, [exitProfileEditor])
 
   useEffect(() => {
     if (!isEditMode || !currentUser) return
@@ -410,6 +417,10 @@ export function OnboardingScreen() {
       const res = await completeOnboarding(payload)
       if (!res.ok && res.error) {
         Alert.alert('No se pudo guardar', res.error)
+        return
+      }
+      if (isEditMode) {
+        router.replace('/perfil')
       }
     } finally {
       setSubmitting(false)
@@ -423,7 +434,7 @@ export function OnboardingScreen() {
       return
     }
     if (isEditMode) {
-      exitProfileEditor()
+      cancelProfileEdit()
       return
     }
     Alert.alert('Salir', '¿Cerrar sesión para usar otra cuenta?', [
@@ -453,26 +464,59 @@ export function OnboardingScreen() {
       style={[styles.flex, { backgroundColor: theme.bg }]}
       behavior={Platform.OS === 'ios' ? 'padding' : undefined}
     >
-      <View style={styles.header}>
-        <Pressable onPress={handleBack} hitSlop={12} style={styles.backBtn}>
-          <Ionicons name="chevron-back" size={24} color={theme.text} />
-        </Pressable>
-        <View style={styles.progressRow}>
-          {Array.from({ length: TOTAL_STEPS }).map((_, i) => (
-            <View
-              key={i}
-              style={[
-                styles.progressSeg,
-                {
-                  backgroundColor:
-                    i < step ? theme.primary : theme.border,
-                },
-              ]}
-            />
-          ))}
+      <SafeAreaView edges={['top']} style={{ backgroundColor: theme.bg }}>
+        <View style={[styles.header, { borderBottomColor: theme.border }]}>
+          <Pressable
+            onPress={handleBack}
+            hitSlop={12}
+            style={styles.headerSideBtn}
+            accessibilityRole="button"
+            accessibilityLabel={isEditMode && step === 1 ? 'Cancelar edición' : 'Volver'}
+          >
+            {isEditMode && step === 1 ? (
+              <>
+                <Ionicons name="close" size={20} color={theme.text} />
+                <Text style={[styles.headerCancelLabel, { color: theme.text }]}>
+                  Cancelar
+                </Text>
+              </>
+            ) : (
+              <Ionicons name="chevron-back" size={24} color={theme.text} />
+            )}
+          </Pressable>
+
+          <View style={styles.progressRow}>
+            {Array.from({ length: TOTAL_STEPS }).map((_, i) => (
+              <View
+                key={i}
+                style={[
+                  styles.progressSeg,
+                  {
+                    backgroundColor:
+                      i < step ? theme.primary : theme.border,
+                  },
+                ]}
+              />
+            ))}
+          </View>
+
+          {isEditMode && step > 1 ? (
+            <Pressable
+              onPress={cancelProfileEdit}
+              hitSlop={12}
+              style={[styles.headerSideBtn, styles.headerSideBtnEnd]}
+              accessibilityRole="button"
+              accessibilityLabel="Cancelar edición"
+            >
+              <Text style={[styles.headerCancelLabel, { color: theme.danger }]}>
+                Cancelar
+              </Text>
+            </Pressable>
+          ) : (
+            <View style={styles.headerSideBtn} />
+          )}
         </View>
-        <View style={styles.backBtn} />
-      </View>
+      </SafeAreaView>
 
       <ScrollView
         style={styles.scroll}
@@ -802,10 +846,25 @@ function createStyles(theme: ReturnType<typeof useScreenTheme>) {
       flexDirection: 'row',
       alignItems: 'center',
       paddingHorizontal: 8,
-      paddingTop: 4,
-      paddingBottom: 8,
+      paddingBottom: 10,
+      borderBottomWidth: StyleSheet.hairlineWidth,
     },
-    backBtn: { width: 44, height: 44, justifyContent: 'center', alignItems: 'center' },
+    headerSideBtn: {
+      minWidth: 88,
+      height: 44,
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'flex-start',
+      gap: 4,
+      paddingHorizontal: 4,
+    },
+    headerSideBtnEnd: {
+      justifyContent: 'flex-end',
+    },
+    headerCancelLabel: {
+      fontSize: 15,
+      fontWeight: '700',
+    },
     progressRow: { flex: 1, flexDirection: 'row', gap: 6, paddingHorizontal: 8 },
     progressSeg: { flex: 1, height: 4, borderRadius: 2 },
     scroll: { flex: 1 },

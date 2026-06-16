@@ -47,7 +47,9 @@ import { computeVenueAvailableSlots, labelForHm } from '../lib/venue-slots'
 import { levelLabel } from '../lib/format-match'
 import { clearCreatePrefill, readCreatePrefill } from '../lib/create-prefill'
 import { consumeRivalTargetTeamId } from '../lib/rival-prefill'
-import { teamIsInSameCity } from '../lib/team-discovery'
+import { teamIsInSameCity, venueIsInSameCity } from '../lib/team-discovery'
+import { MatchDatePickerField } from './match-date-picker-field'
+import { MatchTimePickerField } from './match-time-picker-field'
 
 const GUIDELINES: string[] = [
   'Respeto y buena convivencia: trata a rivales y compañeros con educación; el fútbol amateur es para pasarlo bien.',
@@ -150,7 +152,6 @@ export function CreateMatchScreen() {
   const [bookingNoCourt, setBookingNoCourt] = useState(false)
   const [venueTimesRefreshKey, setVenueTimesRefreshKey] = useState(0)
   const [venueModal, setVenueModal] = useState(false)
-  const [timeModal, setTimeModal] = useState(false)
   const [submitting, setSubmitting] = useState(false)
   const venuePrefillAppliedRef = useRef(false)
   const [teamPickKind, setTeamPickKind] = useState<
@@ -167,13 +168,23 @@ export function CreateMatchScreen() {
     void fetchSportsVenuesList(getSupabase()).then(setSportsVenuesFromDb)
   }, [])
 
+  const organizerVenues = useMemo(() => {
+    if (!currentUser) return []
+    return sportsVenuesFromDb.filter((v) => venueIsInSameCity(currentUser, v))
+  }, [currentUser, sportsVenuesFromDb])
+
   useEffect(() => {
-    if (!currentUser || sportsVenuesFromDb.length === 0) return
+    if (!currentUser?.city?.trim()) return
+    setFormData((f) => ({ ...f, location: currentUser.city.trim() }))
+  }, [currentUser?.id, currentUser?.city])
+
+  useEffect(() => {
+    if (!currentUser || organizerVenues.length === 0) return
     if (venuePrefillAppliedRef.current) return
     void (async () => {
       const prefill = await readCreatePrefill()
       if (!prefill) return
-      const venue = sportsVenuesFromDb.find((v) => v.id === prefill.sportsVenueId)
+      const venue = organizerVenues.find((v) => v.id === prefill.sportsVenueId)
       if (!venue) return
       venuePrefillAppliedRef.current = true
       await clearCreatePrefill()
@@ -187,7 +198,7 @@ export function CreateMatchScreen() {
       }))
       setBookCourtSlot(prefill.bookCourtSlot)
     })()
-  }, [currentUser?.id, sportsVenuesFromDb])
+  }, [currentUser?.id, organizerVenues])
 
   useEffect(() => {
     let cancelled = false
@@ -304,7 +315,7 @@ export function CreateMatchScreen() {
       dayEnd.setDate(dayEnd.getDate() + 1)
       const dow = dayStart.getDay()
       const targetTime = formData.time
-      const candidates = sportsVenuesFromDb.filter((v) => v.id !== linkedVenueId)
+      const candidates = organizerVenues.filter((v) => v.id !== linkedVenueId)
       const checks = await Promise.all(
         candidates.map(async (venue) => {
           const [courts, weeklyHours, reservations] = await Promise.all([
@@ -347,7 +358,7 @@ export function CreateMatchScreen() {
     formData.time,
     formData.location,
     shouldSuggestAlternatives,
-    sportsVenuesFromDb,
+    organizerVenues,
   ])
 
   const userTeams = getUserTeams()
@@ -439,29 +450,11 @@ export function CreateMatchScreen() {
     ({ item }: ListRenderItemInfo<SportsVenue>) => (
       <Pressable style={styles.modalRow} onPress={() => onVenuePick(item)}>
         <Text style={[styles.modalRowText, { color: theme.text }]}>
-          {item.name} — {item.city}
+          {item.name}
         </Text>
       </Pressable>
     ),
     [onVenuePick, theme.text]
-  )
-
-  const renderTimeModalRow = useCallback(
-    ({ item }: ListRenderItemInfo<{ value: string; label: string }>) => (
-      <Pressable
-        style={styles.modalRow}
-        onPress={() => {
-          setBookingNoCourt(false)
-          setFormData((f) => ({ ...f, time: item.value }))
-          setTimeModal(false)
-        }}
-      >
-        <Text style={[styles.modalRowText, { color: theme.text }]}>
-          {item.label}
-        </Text>
-      </Pressable>
-    ),
-    [theme.text]
   )
 
   const renderUserTeamRow = useCallback(
@@ -586,7 +579,7 @@ export function CreateMatchScreen() {
     if (matchType === 'players' && !playersSeekProfile) return
     const dateTime = new Date(`${formData.date}T${formData.time}`)
     if (Number.isNaN(dateTime.getTime())) {
-      Alert.alert('Fecha u hora inválida', 'Usa fecha AAAA-MM-DD y hora del listado.')
+      Alert.alert('Fecha u hora inválida', 'Selecciona fecha y hora del listado.')
       return
     }
 
@@ -800,7 +793,18 @@ export function CreateMatchScreen() {
   const showTeamPickForm = matchType === 'team_pick_flow' && step === 3
   const showReserveForm = matchType === 'reserve' && step === 2
 
-  const dateTimeValid = formData.date.length >= 8 && formData.time.length >= 4
+  const onMatchDateChange = useCallback((date: string) => {
+    setBookingNoCourt(false)
+    setFormData((f) => ({ ...f, date }))
+  }, [])
+
+  const onMatchTimeChange = useCallback((time: string) => {
+    setBookingNoCourt(false)
+    setFormData((f) => ({ ...f, time }))
+  }, [])
+
+  const dateTimeValid =
+    /^\d{4}-\d{2}-\d{2}$/.test(formData.date) && formData.time.length >= 4
 
   const topTitle =
     matchType === 'open' && step === 2
@@ -1423,24 +1427,17 @@ export function CreateMatchScreen() {
               venue={formData.venue}
               onPress={() => setVenueModal(true)}
             />
-            <Text style={styles.label}>Fecha (AAAA-MM-DD)</Text>
-            <TextInput
-              style={styles.input}
+            <Text style={styles.label}>Fecha</Text>
+            <MatchDatePickerField
               value={formData.date}
-              onChangeText={(t) => {
-                setBookingNoCourt(false)
-                setFormData({ ...formData, date: t })
-              }}
-              placeholder="2026-04-15"
+              onChange={onMatchDateChange}
             />
-            <TimeRow
-              label="Hora"
-              valueLabel={
-                timeOptionsForPicker.find((x) => x.value === formData.time)
-                  ?.label ?? 'Elegir'
-              }
+            <Text style={styles.label}>Hora</Text>
+            <MatchTimePickerField
+              value={formData.time}
+              onChange={onMatchTimeChange}
+              options={timeOptionsForPicker}
               loading={!!linkedVenueId && !!formData.date && loadingVenueTimes}
-              onPress={() => setTimeModal(true)}
             />
             {venueTimeHelp && linkedVenueId && formData.date ? (
               <Text style={styles.help}>{venueTimeHelp}</Text>
@@ -1815,22 +1812,14 @@ export function CreateMatchScreen() {
                         Fecha
                       </Text>
                     </View>
-                    <TextInput
-                      style={[
-                        styles.revueltaInput,
-                        {
-                          backgroundColor: revueltaUi.inputBg,
-                          borderColor: revueltaUi.border,
-                          color: revueltaUi.text,
-                        },
-                      ]}
+                    <MatchDatePickerField
+                      variant="revuelta"
                       value={formData.date}
-                      onChangeText={(t) => {
-                        setBookingNoCourt(false)
-                        setFormData({ ...formData, date: t })
-                      }}
-                      placeholder="AAAA-MM-DD"
-                      placeholderTextColor={revueltaUi.muted}
+                      onChange={onMatchDateChange}
+                      backgroundColor={revueltaUi.inputBg}
+                      borderColor={revueltaUi.border}
+                      textColor={revueltaUi.text}
+                      mutedColor={revueltaUi.muted}
                     />
                   </View>
                   <View style={styles.revueltaDateTimeCol}>
@@ -1846,43 +1835,17 @@ export function CreateMatchScreen() {
                         Hora
                       </Text>
                     </View>
-                    <Pressable
-                      style={[
-                        styles.revueltaPicker,
-                        styles.revueltaPickerCompact,
-                        {
-                          backgroundColor: revueltaUi.inputBg,
-                          borderColor: revueltaUi.border,
-                        },
-                      ]}
-                      onPress={() => setTimeModal(true)}
-                    >
-                      {linkedVenueId && formData.date && loadingVenueTimes ? (
-                        <ActivityIndicator color={theme.primary} />
-                      ) : (
-                        <Text
-                          style={[
-                            styles.revueltaPickerText,
-                            {
-                              color:
-                                formData.time && selectedVenueHasChosenTime
-                                  ? revueltaUi.text
-                                  : revueltaUi.muted,
-                            },
-                          ]}
-                          numberOfLines={1}
-                        >
-                          {timeOptionsForPicker.find(
-                            (x) => x.value === formData.time
-                          )?.label ?? 'Selecciona la hora'}
-                        </Text>
-                      )}
-                      <Ionicons
-                        name="chevron-down"
-                        size={18}
-                        color={revueltaUi.muted}
-                      />
-                    </Pressable>
+                    <MatchTimePickerField
+                      variant="revuelta"
+                      value={formData.time}
+                      onChange={onMatchTimeChange}
+                      options={timeOptionsForPicker}
+                      loading={!!linkedVenueId && !!formData.date && loadingVenueTimes}
+                      backgroundColor={revueltaUi.inputBg}
+                      borderColor={revueltaUi.border}
+                      textColor={revueltaUi.text}
+                      mutedColor={revueltaUi.muted}
+                    />
                   </View>
                 </View>
                 {venueTimeHelp && linkedVenueId && formData.date ? (
@@ -1967,23 +1930,17 @@ export function CreateMatchScreen() {
                     />
                   </View>
                 ) : null}
-                <Text style={styles.label}>Fecha (AAAA-MM-DD)</Text>
-                <TextInput
-                  style={styles.input}
+                <Text style={styles.label}>Fecha</Text>
+                <MatchDatePickerField
                   value={formData.date}
-                  onChangeText={(t) => {
-                    setBookingNoCourt(false)
-                    setFormData({ ...formData, date: t })
-                  }}
+                  onChange={onMatchDateChange}
                 />
-                <TimeRow
-                  label="Hora"
-                  valueLabel={
-                    timeOptionsForPicker.find((x) => x.value === formData.time)
-                      ?.label ?? 'Elegir'
-                  }
+                <Text style={styles.label}>Hora</Text>
+                <MatchTimePickerField
+                  value={formData.time}
+                  onChange={onMatchTimeChange}
+                  options={timeOptionsForPicker}
                   loading={!!linkedVenueId && !!formData.date && loadingVenueTimes}
-                  onPress={() => setTimeModal(true)}
                 />
                 {venueTimeHelp && linkedVenueId && formData.date ? (
                   <Text style={styles.help}>{venueTimeHelp}</Text>
@@ -2283,22 +2240,14 @@ export function CreateMatchScreen() {
                       Fecha
                     </Text>
                   </View>
-                  <TextInput
-                    style={[
-                      styles.revueltaInput,
-                      {
-                        backgroundColor: revueltaUi.teamPickMintField,
-                        borderColor: revueltaUi.border,
-                        color: revueltaUi.text,
-                      },
-                    ]}
+                  <MatchDatePickerField
+                    variant="revuelta"
                     value={formData.date}
-                    onChangeText={(t) => {
-                      setBookingNoCourt(false)
-                      setFormData({ ...formData, date: t })
-                    }}
-                    placeholder="AAAA-MM-DD"
-                    placeholderTextColor={revueltaUi.muted}
+                    onChange={onMatchDateChange}
+                    backgroundColor={revueltaUi.teamPickMintField}
+                    borderColor={revueltaUi.border}
+                    textColor={revueltaUi.text}
+                    mutedColor={revueltaUi.muted}
                   />
                 </View>
                 <View style={styles.revueltaDateTimeCol}>
@@ -2314,38 +2263,17 @@ export function CreateMatchScreen() {
                       Hora
                     </Text>
                   </View>
-                  <Pressable
-                    style={[
-                      styles.revueltaPicker,
-                      styles.revueltaPickerCompact,
-                      {
-                        backgroundColor: revueltaUi.teamPickMintField,
-                        borderColor: revueltaUi.border,
-                      },
-                    ]}
-                    onPress={() => setTimeModal(true)}
-                  >
-                    {linkedVenueId && formData.date && loadingVenueTimes ? (
-                      <ActivityIndicator color={theme.primary} />
-                    ) : (
-                      <Text
-                        style={[
-                          styles.revueltaPickerText,
-                          {
-                            color:
-                              formData.time && selectedVenueHasChosenTime
-                                ? revueltaUi.text
-                                : revueltaUi.muted,
-                          },
-                        ]}
-                        numberOfLines={1}
-                      >
-                        {timeOptionsForPicker.find((x) => x.value === formData.time)
-                          ?.label ?? 'Selecciona la hora'}
-                      </Text>
-                    )}
-                    <Ionicons name="chevron-down" size={18} color={revueltaUi.muted} />
-                  </Pressable>
+                  <MatchTimePickerField
+                    variant="revuelta"
+                    value={formData.time}
+                    onChange={onMatchTimeChange}
+                    options={timeOptionsForPicker}
+                    loading={!!linkedVenueId && !!formData.date && loadingVenueTimes}
+                    backgroundColor={revueltaUi.teamPickMintField}
+                    borderColor={revueltaUi.border}
+                    textColor={revueltaUi.text}
+                    mutedColor={revueltaUi.muted}
+                  />
                 </View>
               </View>
               {venueTimeHelp && linkedVenueId && formData.date ? (
@@ -2408,22 +2336,16 @@ export function CreateMatchScreen() {
               onPress={() => setVenueModal(true)}
             />
             <Text style={styles.label}>Fecha</Text>
-            <TextInput
-              style={styles.input}
+            <MatchDatePickerField
               value={formData.date}
-              onChangeText={(t) => {
-                setBookingNoCourt(false)
-                setFormData({ ...formData, date: t })
-              }}
+              onChange={onMatchDateChange}
             />
-            <TimeRow
-              label="Hora"
-              valueLabel={
-                timeOptionsForPicker.find((x) => x.value === formData.time)
-                  ?.label ?? 'Elegir'
-              }
+            <Text style={styles.label}>Hora</Text>
+            <MatchTimePickerField
+              value={formData.time}
+              onChange={onMatchTimeChange}
+              options={timeOptionsForPicker}
               loading={!!linkedVenueId && !!formData.date && loadingVenueTimes}
-              onPress={() => setTimeModal(true)}
             />
             {alternativesBlock}
             <Pressable
@@ -2469,15 +2391,23 @@ export function CreateMatchScreen() {
               ]}
             >
               Centro deportivo
+              {currentUser?.city?.trim() ? (
+                <Text style={{ fontWeight: '500', color: theme.textMuted }}>
+                  {' '}
+                  · {currentUser.city.trim()}
+                </Text>
+              ) : null}
             </Text>
             <View style={styles.modalListWrap}>
               <FlatList
-                data={sportsVenuesFromDb}
+                data={organizerVenues}
                 keyExtractor={(v) => v.id}
                 renderItem={renderVenueModalRow}
                 ListEmptyComponent={
                   <Text style={[styles.muted, { color: theme.textMuted }]}>
-                    No hay centros registrados.
+                    {currentUser?.city?.trim()
+                      ? `No hay centros registrados en ${currentUser.city.trim()}.`
+                      : 'Completa la ciudad en tu perfil para ver centros disponibles.'}
                   </Text>
                 }
               />
@@ -2485,53 +2415,6 @@ export function CreateMatchScreen() {
             <Pressable
               style={styles.modalClose}
               onPress={() => setVenueModal(false)}
-            >
-              <Text style={[styles.modalCloseText, { color: theme.primary }]}>
-                Cerrar
-              </Text>
-            </Pressable>
-          </View>
-        </View>
-      </Modal>
-
-      <Modal visible={timeModal} animationType="slide" transparent>
-        <View style={styles.modalWrap}>
-          <View
-            style={[
-              styles.modalSheet,
-              {
-                backgroundColor: theme.card,
-                borderTopColor: theme.border,
-              },
-            ]}
-          >
-            <Text
-              style={[
-                styles.modalTitle,
-                { color: theme.text, borderBottomColor: theme.border },
-              ]}
-            >
-              Hora
-            </Text>
-            {linkedVenueId && formData.date && loadingVenueTimes ? (
-              <ActivityIndicator style={{ margin: 24 }} color={theme.primary} />
-            ) : (
-              <View style={styles.modalListWrap}>
-                <FlatList
-                  data={timeOptionsForPicker}
-                  keyExtractor={(x) => x.value}
-                  renderItem={renderTimeModalRow}
-                  ListEmptyComponent={
-                    <Text style={[styles.muted, { color: theme.textMuted }]}>
-                      Sin horarios.
-                    </Text>
-                  }
-                />
-              </View>
-            )}
-            <Pressable
-              style={styles.modalClose}
-              onPress={() => setTimeModal(false)}
             >
               <Text style={[styles.modalCloseText, { color: theme.primary }]}>
                 Cerrar
@@ -2873,39 +2756,57 @@ function TypeCard({
   icon: keyof typeof Ionicons.glyphMap
 }) {
   const { theme, styles } = useThemedStyles()
-  const accent =
-    tone === 'red'
-      ? '#3B82F6'
-      : tone === 'teal'
-        ? '#0F4539'
-        : tone === 'gold'
-          ? '#D9A429'
-          : '#36A2EB'
-  const cardBg = theme.cardElevated
-  const cardBorder = theme.border
-  const iconBg = theme.isDark ? `${accent}22` : `${accent}20`
-  const border =
-    tone === 'red'
-      ? styles.typeRed
-      : tone === 'teal'
-        ? styles.typeTeal
-        : tone === 'gold'
-          ? styles.typeGold
-          : styles.typeBlue
+  const palette = useMemo(() => {
+    switch (tone) {
+      case 'red':
+        return {
+          accent: '#2563EB',
+          selectedBg: theme.isDark ? 'rgba(37, 99, 235, 0.16)' : 'rgba(37, 99, 235, 0.08)',
+          selectedBorder: '#2563EB',
+          iconBg: theme.isDark ? 'rgba(37, 99, 235, 0.22)' : 'rgba(37, 99, 235, 0.12)',
+        }
+      case 'teal':
+        return {
+          accent: theme.primary,
+          selectedBg: theme.selectedTint,
+          selectedBorder: theme.primary,
+          iconBg: theme.logoBoxBg,
+        }
+      case 'gold':
+        return {
+          accent: '#D97706',
+          selectedBg: theme.isDark ? 'rgba(217, 119, 6, 0.16)' : 'rgba(245, 158, 11, 0.12)',
+          selectedBorder: '#D97706',
+          iconBg: theme.isDark ? 'rgba(217, 119, 6, 0.22)' : 'rgba(245, 158, 11, 0.14)',
+        }
+      default:
+        return {
+          accent: '#0EA5E9',
+          selectedBg: theme.isDark ? 'rgba(14, 165, 233, 0.14)' : 'rgba(14, 165, 233, 0.08)',
+          selectedBorder: '#0EA5E9',
+          iconBg: theme.isDark ? 'rgba(14, 165, 233, 0.22)' : 'rgba(14, 165, 233, 0.12)',
+        }
+    }
+  }, [theme, tone])
+
   const disabledTone = title === 'Buscar jugadores' && desc.includes('pausado')
+
   return (
     <Pressable
       onPress={onPress}
       style={[
         styles.typeCard,
-        { backgroundColor: cardBg, borderColor: cardBorder },
-        selected && border,
+        {
+          backgroundColor: selected ? palette.selectedBg : theme.cardElevated,
+          borderColor: selected ? palette.selectedBorder : theme.border,
+          borderWidth: selected ? 2 : 1,
+        },
         disabledTone && !selected && styles.typeCardMuted,
       ]}
     >
       <View style={styles.typeRow}>
-        <View style={[styles.typeIconCircle, { backgroundColor: iconBg }]}>
-          <Ionicons name={icon} size={24} color={accent} />
+        <View style={[styles.typeIconCircle, { backgroundColor: palette.iconBg }]}>
+          <Ionicons name={icon} size={24} color={palette.accent} />
         </View>
         <View style={styles.typeTextCol}>
           <Text
@@ -2925,11 +2826,18 @@ function TypeCard({
             {desc}
           </Text>
         </View>
-        {selected ? (
-          <View style={[styles.typeCheck, { backgroundColor: theme.success }]}>
+        <View
+          style={[
+            styles.typeRadio,
+            selected
+              ? { backgroundColor: palette.selectedBorder, borderColor: palette.selectedBorder }
+              : { borderColor: theme.border },
+          ]}
+        >
+          {selected ? (
             <Ionicons name="checkmark" size={16} color={theme.primaryBtnText} />
-          </View>
-        ) : null}
+          ) : null}
+        </View>
       </View>
     </Pressable>
   )
@@ -2952,32 +2860,6 @@ function VenueRow({
         <Text style={styles.pickerBtnText} numberOfLines={2}>
           {venue}
         </Text>
-      </Pressable>
-    </View>
-  )
-}
-
-function TimeRow({
-  label,
-  valueLabel,
-  loading,
-  onPress,
-}: {
-  label: string
-  valueLabel: string
-  loading?: boolean
-  onPress: () => void
-}) {
-  const { styles } = useThemedStyles()
-  return (
-    <View style={styles.fieldBlock}>
-      <Text style={styles.label}>{label}</Text>
-      <Pressable style={styles.pickerBtn} onPress={onPress}>
-        {loading ? (
-          <ActivityIndicator />
-        ) : (
-          <Text style={styles.pickerBtnText}>{valueLabel}</Text>
-        )}
       </Pressable>
     </View>
   )
@@ -3096,37 +2978,10 @@ function createStyles(theme: ReturnType<typeof useScreenTheme>) {
   h2: { fontSize: 20, fontWeight: '800', color: theme.text, marginTop: 4 },
   h2Sub: { fontSize: 16, marginTop: -6, marginBottom: 6 },
   typeCard: {
-    padding: 14,
-    borderRadius: 26,
-    borderWidth: 1.5,
-    borderColor: theme.border,
-    marginBottom: 2,
-  },
-  typeRed: {
-    borderColor: '#86D272',
-    backgroundColor: 'rgba(125, 208, 100, 0.10)',
-    shadowColor: '#66D06F',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.3,
-    shadowRadius: 10,
-    elevation: 3,
-  },
-  typeBlue: {
-    borderColor: '#5BB7EA',
-    backgroundColor: 'rgba(54,162,235,0.10)',
-  },
-  typeTeal: {
-    borderColor: '#86D272',
-    backgroundColor: 'rgba(125, 208, 100, 0.10)',
-    shadowColor: '#66D06F',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.3,
-    shadowRadius: 10,
-    elevation: 3,
-  },
-  typeGold: {
-    borderColor: '#E1BC63',
-    backgroundColor: 'rgba(217,164,41,0.11)',
+    padding: 16,
+    borderRadius: 18,
+    marginBottom: 4,
+    overflow: 'hidden',
   },
   typeCardMuted: { opacity: 0.66 },
   typeRow: { flexDirection: 'row', alignItems: 'center', gap: 12 },
@@ -3142,10 +2997,11 @@ function createStyles(theme: ReturnType<typeof useScreenTheme>) {
   typeTitleMuted: { color: theme.textMuted },
   typeDesc: { fontSize: 15, color: theme.textMuted, marginTop: 2 },
   typeDescMuted: { color: theme.textMuted },
-  typeCheck: {
-    width: 34,
-    height: 34,
-    borderRadius: 17,
+  typeRadio: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    borderWidth: 2,
     alignItems: 'center',
     justifyContent: 'center',
   },

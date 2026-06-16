@@ -23,8 +23,8 @@ function RootLayout() {
 export default Sentry.wrap(RootLayout);
 
 function RootLayoutWithTheme() {
-  const { resolved, tokens } = useThemePreference();
-  const theme = buildScreenTheme(tokens, resolved);
+  const { resolved, tokens, colorVision } = useThemePreference();
+  const theme = buildScreenTheme(tokens, resolved, colorVision);
   const nav = navigationThemeOptions(theme);
   return (
     <AppQueryProvider>

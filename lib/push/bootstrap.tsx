@@ -13,6 +13,7 @@ import { useUnreadNotificationsCount } from '../hooks/use-unread-notifications'
 import { getSupabase, isSupabaseConfigured } from '../supabase/client'
 import { resolvePushNotificationRoute } from '../notifications/resolve-route'
 import { registerDevicePushToken } from './register-device'
+import { isPushEnabledLocally } from './push-settings'
 import { ProductEventNames, trackProductEvent } from '../telemetry/product-analytics'
 
 type NotificationData = {
@@ -80,6 +81,9 @@ export function PushBootstrap() {
 
     const supabase = getSupabase()
     void (async () => {
+      const enabled = await isPushEnabledLocally()
+      if (!enabled) return
+
       const res = await registerDevicePushToken(supabase, currentUser.id)
       if (res.ok) {
         trackProductEvent(ProductEventNames.pushTokenRegistered, {

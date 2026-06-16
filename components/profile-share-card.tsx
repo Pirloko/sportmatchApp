@@ -1,5 +1,6 @@
 import { forwardRef } from 'react'
-import { Image, StyleSheet, Text, View } from 'react-native'
+import { Image as ExpoImage } from 'expo-image'
+import { StyleSheet, Text, View } from 'react-native'
 
 import { SPORTMATCH_SHARE_LOGO } from '../lib/app-brand-assets'
 import { positionLabel } from '../lib/player-profile-ui'
@@ -32,6 +33,10 @@ type Props = {
 const CARD_W = 360
 const CARD_H = 640
 
+/** Resolución de exportación (Stories 9:16, Full HD width). */
+export const PROFILE_SHARE_EXPORT_WIDTH = 1080
+export const PROFILE_SHARE_EXPORT_HEIGHT = 1920
+
 const C = {
   frame: '#D4AF37',
   frameInner: '#F0D878',
@@ -49,7 +54,7 @@ const C = {
   faint: 'rgba(255,255,255,0.38)',
 }
 
-const FADE_STOPS = [0.04, 0.1, 0.18, 0.28, 0.42, 0.58, 0.76, 0.92]
+const FADE_STOPS = [0, 0.22, 0.52, 0.88]
 
 /** Tarjeta 9:16 — cromo coleccionable premium (referencia WC / Panini). */
 export const ProfileShareCard = forwardRef<View, Props>(function ProfileShareCard(
@@ -62,7 +67,7 @@ export const ProfileShareCard = forwardRef<View, Props>(function ProfileShareCar
 
   return (
     <View ref={ref} style={styles.outerFrame} collapsable={false}>
-      <View style={styles.card}>
+      <View style={styles.card} renderToHardwareTextureAndroid>
         <View style={styles.skyLayer} />
         <View style={styles.skyGlowLeft} />
         <View style={styles.skyGlowRight} />
@@ -85,16 +90,22 @@ export const ProfileShareCard = forwardRef<View, Props>(function ProfileShareCar
             <Text style={styles.editionKicker}>SportMatch</Text>
             <Text style={styles.editionTitle}>EDICIÓN COLECCIONISTA</Text>
           </View>
-          <Image
+          <ExpoImage
             source={SPORTMATCH_SHARE_LOGO}
             style={styles.topLogo}
-            resizeMode="contain"
+            contentFit="contain"
           />
         </View>
 
         <View style={styles.heroStage}>
           <View style={styles.heroRing} />
-          <Image source={{ uri: data.photoUri }} style={styles.heroPhoto} />
+          <ExpoImage
+            source={{ uri: data.photoUri }}
+            style={styles.heroPhoto}
+            contentFit="cover"
+            cachePolicy="memory-disk"
+            transition={0}
+          />
           <View style={styles.heroFade}>
             {FADE_STOPS.map((opacity, index) => (
               <View
@@ -138,7 +149,13 @@ export const ProfileShareCard = forwardRef<View, Props>(function ProfileShareCar
 
           <View style={styles.teamCard}>
             {primaryTeam?.logoUri ? (
-              <Image source={{ uri: primaryTeam.logoUri }} style={styles.teamLogo} />
+              <ExpoImage
+                source={{ uri: primaryTeam.logoUri }}
+                style={styles.teamLogo}
+                contentFit="cover"
+                cachePolicy="memory-disk"
+                transition={0}
+              />
             ) : primaryTeam ? (
               <View style={styles.teamLogoFallback}>
                 <Text style={styles.teamLogoInitial}>
@@ -165,10 +182,10 @@ export const ProfileShareCard = forwardRef<View, Props>(function ProfileShareCar
 
           <View style={styles.footerStrip}>
             <View style={styles.footerBrand}>
-              <Image
+              <ExpoImage
                 source={SPORTMATCH_SHARE_LOGO}
                 style={styles.footerLogo}
-                resizeMode="contain"
+                contentFit="contain"
               />
               <View>
                 <Text style={styles.footerBrandName}>SPORTMATCH</Text>
@@ -336,7 +353,6 @@ const styles = StyleSheet.create({
   heroPhoto: {
     width: CARD_W * 0.92,
     height: CARD_H * 0.5,
-    resizeMode: 'cover',
     marginBottom: -18,
   },
   heroFade: {
@@ -344,7 +360,7 @@ const styles = StyleSheet.create({
     left: 0,
     right: 0,
     bottom: -18,
-    height: 120,
+    height: 140,
     flexDirection: 'column',
   },
   heroFadeSlice: {

@@ -38,6 +38,25 @@ const EXPO_PUSH_URL = 'https://exp.host/--/api/v2/push/send'
 const BATCH_SIZE = 50
 const PENDING_LIMIT = 200
 
+function notificationTypeToCategory(type) {
+  switch (type) {
+    case 'chat_message':
+      return 'chat'
+    case 'match_finished_review_pending':
+      return 'reviews'
+    default:
+      return 'matches'
+  }
+}
+
+function isPushAllowedForType(type, prefs) {
+  if (!prefs) return true
+  const category = notificationTypeToCategory(type)
+  if (category === 'chat') return prefs.push_chat !== false
+  if (category === 'reviews') return prefs.push_reviews !== false
+  return prefs.push_matches !== false
+}
+
 function buildExpoPushData(type, payload) {
   const p = payload && typeof payload === 'object' ? payload : {}
   const matchId = p.matchId || p.chatId || ''
@@ -105,6 +124,31 @@ async function fetchActiveTokens(userIds) {
   return map
 }
 
+async function fetchNotificationPreferences(userIds) {
+  if (userIds.length === 0) return new Map()
+
+  const { data, error } = await supabase
+    .from('notification_preferences')
+    .select('user_id, push_matches, push_chat, push_reviews')
+    .in('user_id', userIds)
+
+  if (error) {
+    if (error.message.includes('notification_preferences')) {
+      console.warn(
+        '[cron] Tabla notification_preferences no existe. Ejecuta scripts/notification-preferences-migration.sql'
+      )
+      return new Map()
+    }
+    throw new Error(`fetch preferences: ${error.message}`)
+  }
+
+  const map = new Map()
+  for (const row of data ?? []) {
+    map.set(row.user_id, row)
+  }
+  return map
+}
+
 async function sendExpoBatch(messages) {
   if (messages.length === 0) return { ok: true, tickets: [] }
 
@@ -148,13 +192,23 @@ async function main() {
   }
 
   const userIds = [...new Set(pending.map((n) => n.user_id))]
-  const tokensByUser = await fetchActiveTokens(userIds)
+  const [tokensByUser, prefsByUser] = await Promise.all([
+    fetchActiveTokens(userIds),
+    fetchNotificationPreferences(userIds),
+  ])
 
   const messages = []
   const notificationIdsToMark = []
+  let skippedByPreference = 0
 
   for (const n of pending) {
     notificationIdsToMark.push(n.id)
+    const prefs = prefsByUser.get(n.user_id)
+    if (!isPushAllowedForType(n.type, prefs)) {
+      skippedByPreference += 1
+      continue
+    }
+
     const tokens = tokensByUser.get(n.user_id) ?? []
     const data = buildExpoPushData(n.type, n.payload)
 
@@ -182,7 +236,7 @@ async function main() {
   await markPushSent(notificationIdsToMark)
 
   console.log(
-    `[cron] Procesadas ${pending.length} notificaciones in-app; push Expo enviados: ${sent}; marcadas push_sent_at: ${notificationIdsToMark.length}`
+    `[cron] Procesadas ${pending.length} notificaciones in-app; push omitidos por preferencia: ${skippedByPreference}; push Expo enviados: ${sent}; marcadas push_sent_at: ${notificationIdsToMark.length}`
   )
 }
 

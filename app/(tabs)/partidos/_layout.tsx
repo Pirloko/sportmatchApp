@@ -4,8 +4,8 @@ import { useThemePreference } from '../../../lib/theme-context';
 import { buildScreenTheme, navigationThemeOptions } from '../../../lib/theme-ui';
 
 export default function PartidosStackLayout() {
-  const { tokens, resolved } = useThemePreference();
-  const theme = buildScreenTheme(tokens, resolved);
+  const { tokens, resolved, colorVision } = useThemePreference();
+  const theme = buildScreenTheme(tokens, resolved, colorVision);
   const nav = navigationThemeOptions(theme);
 
   return (

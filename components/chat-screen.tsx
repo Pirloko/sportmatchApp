@@ -8,7 +8,6 @@ import {
   KeyboardAvoidingView,
   Platform,
   Pressable,
-  ScrollView,
   StyleSheet,
   Text,
   TextInput,
@@ -24,7 +23,6 @@ import {
 import {
   formatMatchClock,
   formatMatchDateTime,
-  formatMatchWeekdayDate,
   formatRelativeUntil,
 } from '../lib/format-match'
 import { useApp } from '../lib/app-provider'
@@ -96,23 +94,6 @@ function toCachedRows(msgs: UiMessage[]): ChatMessageRow[] {
     )
 }
 
-function participantStatusLabel(s: string): string {
-  switch (s) {
-    case 'creator':
-      return 'Organizador'
-    case 'confirmed':
-      return 'Confirmado'
-    case 'pending':
-      return 'Pendiente'
-    case 'invited':
-      return 'Invitado'
-    case 'cancelled':
-      return 'Cancelado'
-    default:
-      return s
-  }
-}
-
 export function ChatScreen() {
   const params = useLocalSearchParams<{ id?: string | string[] }>()
   const opportunityId = Array.isArray(params.id) ? params.id[0] : params.id
@@ -132,11 +113,9 @@ export function ChatScreen() {
   const [messages, setMessages] = useState<UiMessage[]>([])
   const [loading, setLoading] = useState(true)
   const [newMessage, setNewMessage] = useState('')
-  const [showInfo, setShowInfo] = useState(false)
   const [participants, setParticipants] = useState<OpportunityParticipantRow[]>(
     []
   )
-  const [loadingParticipants, setLoadingParticipants] = useState(false)
   const [myRating, setMyRating] = useState<MatchOpportunityRatingRow | null>(
     null
   )
@@ -196,7 +175,6 @@ export function ChatScreen() {
       setParticipants([])
       return
     }
-    setLoadingParticipants(true)
     try {
       const supabase = getSupabase()
       const rows = await fetchParticipantsForOpportunity(
@@ -204,8 +182,8 @@ export function ChatScreen() {
         opportunityId
       )
       setParticipants(rows)
-    } finally {
-      setLoadingParticipants(false)
+    } catch {
+      setParticipants([])
     }
   }, [opportunityId, currentUser])
 
@@ -319,8 +297,8 @@ export function ChatScreen() {
   }, [loadMessages])
 
   useEffect(() => {
-    if (showInfo) void loadParticipants()
-  }, [showInfo, loadParticipants])
+    void loadParticipants()
+  }, [loadParticipants])
 
   useEffect(() => {
     void loadMyRating()
@@ -617,9 +595,6 @@ export function ChatScreen() {
               </Text>
             </View>
           </View>
-          <Pressable onPress={() => setShowInfo((v) => !v)} hitSlop={8}>
-            <Text style={styles.infoBtn}>ℹ️</Text>
-          </Pressable>
         </View>
 
         <Pressable
@@ -641,50 +616,6 @@ export function ChatScreen() {
             suspendMatchOpportunity={suspendMatchOpportunity}
             submitMatchRating={submitMatchRating}
           />
-        ) : null}
-
-        {showInfo ? (
-          <ScrollView
-            style={styles.infoPanel}
-            keyboardShouldPersistTaps="handled"
-          >
-            <Text style={styles.infoLine}>
-              📅 {formatMatchWeekdayDate(opportunity.dateTime)}{' '}
-              {formatMatchClock(opportunity.dateTime)} hrs
-            </Text>
-            <Text style={styles.infoLine}>📍 {opportunity.venue}</Text>
-            <Text style={styles.infoMeta}>
-              Organiza: {opportunity.creatorName}
-            </Text>
-            {opportunity.status === 'cancelled' && opportunity.suspendedReason ? (
-              <View style={styles.warnBox}>
-                <Text style={styles.warnTitle}>Partido suspendido</Text>
-                <Text style={styles.warnBody}>{opportunity.suspendedReason}</Text>
-              </View>
-            ) : null}
-            <Text style={styles.partTitle}>Participantes</Text>
-            {loadingParticipants ? (
-              <BallLoadingIndicator size="sm" message="Cargando…" />
-            ) : participants.length > 0 ? (
-              participants.map((p) => (
-                <View key={p.id} style={styles.partRow}>
-                  <Image source={{ uri: p.photo }} style={styles.partAvatar} />
-                  <Text style={styles.partName} numberOfLines={1}>
-                    {p.name}
-                    {(opportunity.type === 'open' || opportunity.type === 'players') &&
-                    p.isGoalkeeper
-                      ? ' 🧤'
-                      : ''}
-                  </Text>
-                  <Text style={styles.partStatus}>
-                    {participantStatusLabel(p.status)}
-                  </Text>
-                </View>
-              ))
-            ) : (
-              <Text style={styles.infoMeta}>Sin participantes aún.</Text>
-            )}
-          </ScrollView>
         ) : null}
 
         <FlatList
@@ -830,7 +761,6 @@ function createStyles(theme: ReturnType<typeof useScreenTheme>) {
   headerText: { flex: 1, minWidth: 0 },
   headerTitle: { fontSize: 16, fontWeight: '700', color: theme.text },
   headerSub: { fontSize: 12, color: theme.textMuted, marginTop: 2 },
-  infoBtn: { fontSize: 22 },
   detailLink: {
     paddingVertical: 8,
     paddingHorizontal: 16,
@@ -838,54 +768,6 @@ function createStyles(theme: ReturnType<typeof useScreenTheme>) {
     borderBottomColor: theme.border,
   },
   detailLinkText: { fontSize: 14, fontWeight: '600', color: theme.link },
-  infoPanel: {
-    maxHeight: 220,
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    backgroundColor: theme.bg,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: theme.border,
-  },
-  infoLine: { fontSize: 14, color: theme.text, marginBottom: 6 },
-  infoMeta: { fontSize: 13, color: theme.textMuted, marginBottom: 8 },
-  warnBox: {
-    borderRadius: 10,
-    borderWidth: 1,
-    borderColor: theme.isDark ? 'rgba(248, 113, 113, 0.45)' : 'rgba(220, 38, 38, 0.35)',
-    backgroundColor: theme.isDark ? 'rgba(220, 38, 38, 0.16)' : 'rgba(220, 38, 38, 0.08)',
-    padding: 10,
-    marginBottom: 10,
-  },
-  warnTitle: {
-    fontSize: 11,
-    fontWeight: '700',
-    color: theme.danger,
-    textTransform: 'uppercase',
-    marginBottom: 4,
-  },
-  warnBody: { fontSize: 14, color: theme.text },
-  partTitle: {
-    fontSize: 11,
-    fontWeight: '700',
-    color: theme.textMuted,
-    textTransform: 'uppercase',
-    marginTop: 8,
-    marginBottom: 8,
-  },
-  partRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    marginBottom: 8,
-  },
-  partAvatar: {
-    width: 28,
-    height: 28,
-    borderRadius: 14,
-    backgroundColor: theme.chipBg,
-  },
-  partName: { flex: 1, fontSize: 14, color: theme.text },
-  partStatus: { fontSize: 11, color: theme.textMuted },
   msgScroll: { flex: 1 },
   msgContent: { padding: 16, paddingBottom: 8 },
   olderHeader: {

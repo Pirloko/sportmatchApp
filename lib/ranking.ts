@@ -52,6 +52,7 @@ export type PlayerRankingRow = {
   level: User['level']
   isCurrentUser: boolean
   lastPlayedAt: Date | null
+  mvpWins: number
 } & WinDrawLoss &
   RankingPercents & { played: number }
 
@@ -84,7 +85,8 @@ function compareTeamRank(a: TeamRankingRow, b: TeamRankingRow): number {
 export function buildPlayerRankingRows(
   currentUser: User,
   others: User[],
-  lastPlayedAt: Map<string, Date>
+  lastPlayedAt: Map<string, Date>,
+  mvpWinsByUser: Map<string, number> = new Map()
 ): PlayerRankingRow[] {
   const pool = [
     currentUser,
@@ -106,6 +108,7 @@ export function buildPlayerRankingRows(
       level: u.level,
       isCurrentUser: u.id === currentUser.id,
       lastPlayedAt: lastPlayedAt.get(u.id) ?? null,
+      mvpWins: mvpWinsByUser.get(u.id) ?? 0,
       ...rec,
     }
   })
