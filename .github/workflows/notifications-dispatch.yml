@@ -9,14 +9,16 @@ name: Notifications dispatch
 
 on:
   schedule:
-    # Cada 10 minutos (UTC)
-    - cron: '*/10 * * * *'
+    # Cada 5 min (mínimo en GitHub Actions) — push casi en tiempo real para chat.
+    - cron: '*/5 * * * *'
   workflow_dispatch:
 
 jobs:
   dispatch:
     runs-on: ubuntu-latest
     timeout-minutes: 5
+    # Evita fallos y emails diarios hasta configurar secrets en GitHub Actions.
+    if: ${{ secrets.SUPABASE_URL != '' && secrets.SUPABASE_SERVICE_ROLE_KEY != '' }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
